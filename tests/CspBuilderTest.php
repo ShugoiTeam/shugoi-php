@@ -14,7 +14,8 @@ class CspBuilderTest extends TestCase
         $result = $csp->build();
 
         $this->assertStringContainsString("default-src 'self'", $result);
-        $this->assertStringContainsString("script-src 'self' 'unsafe-inline' 'unsafe-eval'", $result);
+        $this->assertStringContainsString("script-src 'self' 'unsafe-inline'", $result);
+        $this->assertStringNotContainsString("'unsafe-eval'", $result);
         $this->assertStringContainsString("connect-src 'self'", $result);
         $this->assertStringContainsString("style-src 'self' 'unsafe-inline'", $result);
         $this->assertStringContainsString("font-src 'self' data:", $result);
@@ -54,7 +55,7 @@ class CspBuilderTest extends TestCase
         $csp = new CspBuilder($config);
         $result = $csp->build();
 
-        $this->assertStringContainsString("script-src 'self' 'unsafe-inline' 'unsafe-eval' https://api.example.com https://shugoi.com", $result);
+        $this->assertStringContainsString("script-src 'self' 'unsafe-inline' https://api.example.com https://shugoi.com", $result);
         $this->assertStringContainsString("connect-src 'self' https://api.example.com https://shugoi.com", $result);
         $this->assertStringContainsString("style-src 'self' 'unsafe-inline' https://api.example.com https://shugoi.com", $result);
         $this->assertStringContainsString("font-src 'self' data: https://api.example.com https://shugoi.com", $result);
@@ -96,7 +97,7 @@ class CspBuilderTest extends TestCase
         $csp = new CspBuilder($config);
         $result = $csp->build();
 
-        $this->assertStringContainsString("script-src 'self' 'unsafe-inline' 'unsafe-eval' https://shugoi.com", $result);
+        $this->assertStringContainsString("script-src 'self' 'unsafe-inline' https://shugoi.com", $result);
     }
 
     public function testMergeDeduplicatesValues(): void

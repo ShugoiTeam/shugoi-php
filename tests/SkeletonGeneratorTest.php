@@ -33,7 +33,8 @@ class SkeletonGeneratorTest extends TestCase
 
         $this->assertStringStartsWith('<script>', $result);
         $this->assertStringEndsWith('</script>', $result);
-        $this->assertStringContainsString('eval([...', $result);
+        $this->assertStringContainsString('window.__sg_siteKey=', $result);
+        $this->assertStringNotContainsString('eval(', $result);
     }
 
     public function test_rd_function_present_in_decoded_code(): void
@@ -51,28 +52,19 @@ class SkeletonGeneratorTest extends TestCase
         $this->assertStringContainsString('function rd(', $decoded);
     }
 
-    public function test_unicode_encoding_produces_non_ascii(): void
+    public function test_closing_script_tags_are_escaped(): void
     {
         $result = $this->generator->generate(
             token: 't:1:a:s',
-            guards: ['detect' => '', 'guard' => ''],
+            guards: ['detect' => 'window.x="</script><script>alert(1)</script>"', 'guard' => ''],
             config: [],
             restrictedAccess: false,
             locale: 'en',
             baseUrl: 'https://shugoi.com/api/v1',
         );
 
-        preg_match("/'([^']+)'/", $result, $matches);
-        $this->assertNotEmpty($matches[1]);
-        $encoded = $matches[1];
-        for ($i = 0; $i < strlen($encoded); $i++) {
-            $byte = ord($encoded[$i]);
-            if ($byte > 127) {
-                $this->assertTrue(true);
-                return;
-            }
-        }
-        $this->fail('Expected at least one multi-byte character in encoded output');
+        $this->assertSame(1, preg_match_all('#</script>#i', $result));
+        $this->assertStringContainsString('<\\/script>', $result);
     }
 
     public function test_showBlock_function_present_in_decoded_code(): void
@@ -137,18 +129,6 @@ class SkeletonGeneratorTest extends TestCase
 
     private function decodeSkeleton(string $skeleton): string
     {
-        $start = strpos($skeleton, "'");
-        if ($start === false) return '';
-        $end = strpos($skeleton, "'", $start + 1);
-        if ($end === false) return '';
-        $encoded = substr($skeleton, $start + 1, $end - $start - 1);
-        $decoded = '';
-        $len = mb_strlen($encoded, 'UTF-8');
-        for ($i = 0; $i < $len; $i++) {
-            $char = mb_substr($encoded, $i, 1, 'UTF-8');
-            $cp = mb_ord($char, 'UTF-8');
-            $decoded .= chr($cp - 917504);
-        }
-        return $decoded;
+        return preg_match('#<script>(.*)</script>#s', $skeleton, $matches) ? $matches[1] : '';
     }
 }

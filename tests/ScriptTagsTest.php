@@ -55,7 +55,8 @@ class ScriptTagsTest extends TestCase
         $result = $this->scriptTags->generate();
 
         $this->assertStringContainsString('<script>', $result['guardDetect']);
-        $this->assertStringContainsString('eval([...', $result['guardDetect']);
+        $this->assertStringContainsString('window.__sg_siteKey=', $result['guardDetect']);
+        $this->assertStringNotContainsString('eval(', $result['guardDetect']);
     }
 
     public function test_token_is_non_empty_string(): void

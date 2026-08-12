@@ -1,11 +1,13 @@
 <?php
+declare(strict_types=1);
+
 namespace Shugoi;
 
 class CspBuilder
 {
     private const DEFAULT_DIRECTIVES = [
         'default-src' => ["'self'"],
-        'script-src' => ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        'script-src' => ["'self'", "'unsafe-inline'"],
         'connect-src' => ["'self'"],
         'style-src' => ["'self'", "'unsafe-inline'"],
         'font-src' => ["'self'", 'data:'],
@@ -32,11 +34,6 @@ class CspBuilder
             if (!in_array($shugoiOrigin, $directives[$dir])) {
                 $directives[$dir][] = $shugoiOrigin;
             }
-        }
-        if (!$this->config->splitRender) {
-            $directives['script-src'] = array_values(
-                array_filter($directives['script-src'], fn($v) => $v !== "'unsafe-eval'")
-            );
         }
         if ($this->config->extraDirectives) {
             foreach ($this->config->extraDirectives as $name => $values) {

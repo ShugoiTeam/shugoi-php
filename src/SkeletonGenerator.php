@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace Shugoi;
 
 /**
@@ -63,18 +64,13 @@ class SkeletonGenerator
         $fragments[] = $this->cleanupFragment();
 
         $combined = implode(';', $fragments);
-        // Échappe `</script>` / `</style>` AVANT l'encodage unicode (sinon le HTML parser
-        // coupe le <script> au premier `</script>` du guard-detect obfusqué).
         $combined = preg_replace('#</(script|style)#i', '<\\\\/$1', $combined);
 
         if ($this->obfuscator) {
             $combined = $this->obfuscator->obfuscate($combined, $siteKey);
         }
 
-        $encoded = $this->unicodeEncode($combined);
-        $bootCode = "eval([...'" . $encoded . "'].map(function(x){return String.fromCodePoint(x.codePointAt(0)-917504)}).join(''))";
-
-        return '<script>' . $bootCode . '</script>';
+        return '<script>' . $combined . '</script>';
     }
 
     private function showBlockFragment(array $msgs): string
@@ -134,18 +130,6 @@ class SkeletonGenerator
     private static function jsStr(string $s): string
     {
         return str_replace('<', '\\x3c', substr(json_encode($s, JSON_UNESCAPED_UNICODE), 1, -1));
-    }
-
-    /** Encodage par code unit UTF-16 (parité charCodeAt du module Node). */
-    private function unicodeEncode(string $code): string
-    {
-        $utf16 = mb_convert_encoding($code, 'UTF-16BE', 'UTF-8');
-        $units = unpack('n*', $utf16);
-        $result = '';
-        foreach ($units as $unit) {
-            $result .= mb_chr(917504 + $unit, 'UTF-8');
-        }
-        return $result;
     }
 
     private function isProduction(): bool

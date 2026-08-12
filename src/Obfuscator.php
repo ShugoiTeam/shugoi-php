@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 namespace Shugoi;
 
 class Obfuscator
@@ -40,7 +42,7 @@ class Obfuscator
         }
         usort($entries, fn($a, $b) => $a['hash'] <=> $b['hash']);
         foreach ($entries as $entry) {
-            $suffix = base_convert(($entry['hash'] % 9000 + 1000), 10, 36);
+            $suffix = base_convert((string)($entry['hash'] % 9000 + 1000), 10, 36);
             $newName = $entry['to'] . $suffix;
             $r = preg_replace('/\b' . preg_quote($entry['from'], '/') . '\(/', $newName . '(', $r);
         }

@@ -50,7 +50,8 @@ class GuardInjectorTest extends TestCase
 
         $this->assertIsString($result);
         $this->assertStringContainsString('<script>', $result);
-        $this->assertStringContainsString('eval([...', $result);
+        $this->assertStringContainsString('window.__sg_siteKey=', $result);
+        $this->assertStringNotContainsString('eval(', $result);
     }
 
     public function test_inject_with_restricted_access_adds_config_script(): void
