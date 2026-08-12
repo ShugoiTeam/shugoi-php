@@ -17,9 +17,6 @@ class BlockPage
         $htmlTitle = htmlspecialchars($title, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $htmlBadge = htmlspecialchars($badge, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $htmlDesc = htmlspecialchars($message, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-
-        // Compte à rebours : on enveloppe les secondes dans le message, sinon on ajoute
-        // le span directement (le module Node met à jour #cd via un script dédié).
         if ($remainingSeconds !== null) {
             $replaced = preg_replace('/(\d+)s/', '<span id="sg-countdown">$1s</span>', $htmlDesc, 1, $n);
             if ($n > 0) {
@@ -78,8 +75,6 @@ class BlockPage
         $locale = $ctx['locale'] ?? 'en';
         return self::shield($locale, Locales::get($locale, 'blockedTitle'), Locales::get($locale, 'devtoolsBody'), Locales::get($locale, 'blockedBadge'), $ctx['host'] ?? null);
     }
-
-    /** Format du temps restant — parité exacte avec core.ts (timeStr). */
     private static function formatRemaining(int $seconds): string
     {
         $mins = intdiv($seconds, 60);

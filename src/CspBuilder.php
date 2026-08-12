@@ -55,9 +55,6 @@ class CspBuilder
                 $existingDirectives[$name] = array_values(array_unique([...$existingDirectives[$name], ...$values]));
             }
         }
-        // Spec CSP : le mot-clé 'none' doit être SEUL dans une directive — sinon il est
-        // ignoré par le navigateur. Lors d'un merge (ex. un site définit frame-ancestors
-        // 'none' et le module ajoute 'self'), on garde uniquement 'none' (le plus restrictif).
         foreach ($existingDirectives as $name => $values) {
             if (in_array("'none'", $values, true) && count($values) > 1) {
                 $existingDirectives[$name] = ["'none'"];

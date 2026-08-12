@@ -34,7 +34,6 @@ class PowTest extends TestCase
     public function test_leading_zero_bits_corrected_counting(): void
     {
         $pow = $this->makePow();
-        // Nibble 3 = 0b0011 : 2 bits à zéro en tête (l'ancien comptage donnait 0).
         $this->assertEquals(2, $pow->leadingZeroBits('3' . str_repeat('0', 63)));
         $this->assertEquals(1, $pow->leadingZeroBits('7' . str_repeat('0', 63)));
         $this->assertEquals(0, $pow->leadingZeroBits('8' . str_repeat('0', 63)));

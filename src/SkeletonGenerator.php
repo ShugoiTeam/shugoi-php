@@ -1,11 +1,6 @@
 <?php
 declare(strict_types=1);
 namespace Shugoi;
-
-/**
- * Génère le skeleton HTML (bootcode unicode) injecté dans la page — parité avec
- * generateSkeleton (render.ts du module Node). Retourne uniquement <script>…</script>.
- */
 class SkeletonGenerator
 {
     public function __construct(
@@ -30,12 +25,8 @@ class SkeletonGenerator
         $fragments[] = 'window.__sg_siteKey=' . json_encode($siteKey, JSON_UNESCAPED_UNICODE);
         $fragments[] = 'window.__sg_baseUrl=' . json_encode($baseUrl, JSON_UNESCAPED_UNICODE);
         $fragments[] = 'window.__sg_config=' . json_encode($flags);
-        // Mode debug (audit #8) : piloté UNIQUEMENT par le serveur. En production ce flag
-        // est toujours false → le guard n'active jamais ses traces via ?sg_probe_debug=1.
         $fragments[] = 'window.__sg_diagEnabled=' . ($this->isProduction() ? 'false' : 'true');
         $fragments[] = "try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}";
-        // Challenge PoW anti-curl : le guard le résout en JS et l'envoie au wlc.
-        // salt = HMAC(secret, ts) ; difficulté = config (injectée par GuardInjector).
         $powTs = time();
         $powSecret = $this->tokenSigner->secret();
         $powSalt = $powSecret !== '' ? hash_hmac('sha256', (string)$powTs, $powSecret) : '';
@@ -48,7 +39,6 @@ class SkeletonGenerator
         if (!$restrictedAccess) {
             $fragments[] = 'window.__sg_disableRestrictedAccess=true';
         }
-        // Fusion des guards (audit) : seul guard-detect est injecté (parité module Node).
         if (!empty($guards['detect'])) {
             $fragments[] = 'try{' . $guards['detect'] . '}catch(e){window.__sg_blocked=true}';
         }
@@ -125,8 +115,6 @@ class SkeletonGenerator
             . 'window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};'
             . 'window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}';
     }
-
-    /** jsStr : JSON sans guillemets externes + échappe `<` (parité render.ts). */
     private static function jsStr(string $s): string
     {
         return str_replace('<', '\\x3c', substr(json_encode($s, JSON_UNESCAPED_UNICODE), 1, -1));

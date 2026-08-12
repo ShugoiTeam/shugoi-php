@@ -21,8 +21,6 @@ class ApiClient
 
     public function fetchWhitelist(?string $baseUrl = null): array
     {
-        // §divulgation : la config (detectionFlags/skipPaths) n'est rendue qu'à une clé
-        // prouvant possession du secret (sig = HMAC(signingSecret, cb)). La siteKey est publique.
         $cb = bin2hex(random_bytes(4));
         try {
             $sig = hash_hmac('sha256', $cb, $this->config->getSigningSecret());
@@ -49,8 +47,6 @@ class ApiClient
         $response = $this->http->request('GET', $url);
         return (string)$response->getBody();
     }
-
-    /** §7bis.2 : le SaaS exige sig=HMAC(secret, cb) dès qu'un cb est fourni (parité module Node). */
     private function guardCb(): string
     {
         $cb = bin2hex(random_bytes(4));
@@ -86,7 +82,6 @@ class ApiClient
     {
         $url = $this->config->baseUrl . '/event';
         try {
-            // Parité module Node : le payload attend `reason` (pas `type`).
             $this->http->request('POST', $url, [
                 'json' => array_merge(['siteKey' => $this->config->siteKey, 'reason' => $type], $data),
             ]);

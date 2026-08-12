@@ -33,8 +33,6 @@ class Locales
         $msg = $messages[$key] ?? $key;
         return empty($args) ? $msg : sprintf($msg, ...$args);
     }
-
-    /** Retourne le tableau complet des messages pour une locale. */
     public static function getAll(string $locale): array
     {
         return $locale === 'fr' ? self::FR : self::EN;

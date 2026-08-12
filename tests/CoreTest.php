@@ -78,7 +78,6 @@ class CoreTest extends TestCase
     {
         $core = $this->makeCore();
         $this->assertNull($core->evaluate(['path' => '/api/test', 'ua' => 'curl/7.68', 'ip' => '1.2.3.4']));
-        // Préfixe-match large interdit (parité Node) : /apiscraper n'est pas allowlisté.
         $this->assertNotNull($core->evaluate(['path' => '/apiscraper', 'ua' => 'Mozilla/5.0', 'ip' => '1.2.3.4']));
     }
 
@@ -99,7 +98,6 @@ class CoreTest extends TestCase
     public function test_whitelisted_bot_not_blocked(): void
     {
         $core = $this->makeCore(['verifyBots' => false]);
-        // Slurp (UA non-Mozilla) : pas de PoW, exempté du blocage headless.
         $result = $core->evaluate([
             'path' => '/',
             'ua' => 'Slurp/1.0 (+http://www.yahoo.net/slurp)',
@@ -111,7 +109,6 @@ class CoreTest extends TestCase
 
     public function test_mozilla_whitelisted_bot_is_challenged_like_npm(): void
     {
-        // Parité module Node : un UA Mozilla (ex. Googlebot) passe par le pre-flight PoW.
         $core = $this->makeCore(['verifyBots' => false]);
         $result = $core->evaluate([
             'path' => '/',
@@ -198,11 +195,9 @@ class CoreTest extends TestCase
         $proof = $this->solvePow($config, 10);
         $ctx = ['path' => '/', 'ua' => 'Mozilla/5.0 Chrome/120', 'ip' => '1.2.3.4', 'sgProof' => $proof];
         $this->assertNull($core->evaluate($ctx));
-        // Rejeu de la même preuve (même IP) → 307 challenge.
         $second = $core->evaluate($ctx);
         $this->assertNotNull($second);
         $this->assertEquals(307, $second['status']);
-        // Round 17 : rejeu depuis une AUTRE IP → 307 aussi (single-use GLOBAL, plus de bypass cross-IP).
         $crossIp = $core->evaluate(['path' => '/', 'ua' => 'Mozilla/5.0 Chrome/120', 'ip' => '9.9.9.9', 'sgProof' => $proof]);
         $this->assertNotNull($crossIp);
         $this->assertEquals(307, $crossIp['status']);

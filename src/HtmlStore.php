@@ -37,14 +37,12 @@ class HtmlStore
         int $maxReads = -1,
         bool $contentReplace = false
     ): void {
-        // Evict expired
         foreach ($this->store as $key => $entry) {
             if (microtime(true) >= $entry['expiresAt']) {
                 $this->memoryUsed -= strlen($entry['html']);
                 unset($this->store[$key]);
             }
         }
-        // Enforce max tokens
         while (count($this->store) >= self::MAX_TOKENS) {
             reset($this->store);
             $firstKey = key($this->store);
@@ -53,7 +51,6 @@ class HtmlStore
             unset($this->store[$firstKey]);
         }
         $htmlLen = strlen($html);
-        // Enforce max memory
         while ($this->memoryUsed + $htmlLen > self::MAX_MEMORY_BYTES && count($this->store) > 0) {
             reset($this->store);
             $firstKey = key($this->store);
@@ -61,7 +58,6 @@ class HtmlStore
             $this->memoryUsed -= strlen($this->store[$firstKey]['html']);
             unset($this->store[$firstKey]);
         }
-        // Disk fallback
         if ($this->diskPath) {
             $suffix = substr($token, -8);
             $this->atomicWrite("{$this->diskPath}/{$suffix}", $html);

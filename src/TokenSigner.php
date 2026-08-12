@@ -5,7 +5,6 @@ namespace Shugoi;
 
 class TokenSigner
 {
-    /** Parité module Node (render.ts) : TTL du render-grant réduit à 60 s (audit 2026-08-03). */
     public const GRANT_TTL_MS = 60_000;
     public const TOKEN_TTL_MS = 120_000;
 
@@ -38,8 +37,6 @@ class TokenSigner
             'sig' => $sig,
         ];
     }
-
-    /** Secret HMAC effectif, ou '' si aucun secret configuré. */
     public function secret(): string
     {
         try {
@@ -48,12 +45,6 @@ class TokenSigner
             return '';
         }
     }
-
-    /**
-     * Vérifie un render-grant émis par le wlc serveur (anti-bypass "token-only").
-     * Format : base36(timestamp) + ":" + HMAC(secret, "render-grant:siteKey:mid:token:ip:ts").
-     * Lié au token + IP + siteKey + TTL 60 s.
-     */
     public function verifyRenderGrant(
         ?string $mid,
         ?string $grant,

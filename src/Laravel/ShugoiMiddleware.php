@@ -17,8 +17,6 @@ class ShugoiMiddleware
         if (str_starts_with($request->path(), '__shugoi/')) {
             return $next($request);
         }
-
-        // Convert Laravel request to PSR-7
         $psrFactory = new Psr17Factory();
         $uri = $psrFactory->createUri($request->fullUrl());
         $headers = $request->headers->all();
@@ -37,7 +35,6 @@ class ShugoiMiddleware
             public function __construct(private $next) {}
             public function handle(\Psr\Http\Message\ServerRequestInterface $request): \Psr\Http\Message\ResponseInterface
             {
-                // Rebuild Laravel request
                 $method = $request->getMethod();
                 $uri = (string)$request->getUri();
                 $headers = $request->getHeaders();
@@ -47,7 +44,6 @@ class ShugoiMiddleware
                     $laravelRequest->headers->set($name, $values);
                 }
                 $response = ($this->next)($laravelRequest);
-                // Convert Laravel response to PSR-7
                 $psrFactory = new Psr17Factory();
                 $psrResponse = new \Nyholm\Psr7\Response(
                     $response->getStatusCode(),
@@ -59,8 +55,6 @@ class ShugoiMiddleware
         };
 
         $psrResponse = $this->middleware->process($psrRequest, $handler);
-
-        // Convert PSR-7 response back to Laravel response
         $laravelResponse = response(
             (string)$psrResponse->getBody(),
             $psrResponse->getStatusCode(),

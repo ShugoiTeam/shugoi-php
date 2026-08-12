@@ -2,14 +2,6 @@
 declare(strict_types=1);
 
 namespace Shugoi;
-
-/**
- * Injection de la notice de consentement dans le HTML rendu.
- * Parité avec injectNoticeScript (render.ts du module Node) : overlay bloquant z-index max,
- * MutationObserver anti-bypass (garde _applying + mo.takeRecords()), seul OK ferme
- * (ack serveur via POST /notice, lié au machineId). Les placeholders mid/sk/base sont
- * remplacés à l'injection.
- */
 class Notice
 {
     public const SCRIPT = <<<'JS'
@@ -92,16 +84,6 @@ class Notice
 })();
 </script>
 JS;
-
-    /**
-     * Injecte la notice dans le HTML rendu (avant </body>).
-     * @param string $html HTML rendu
-     * @param string $mid machineId du client
-     * @param string $siteKey siteKey
-     * @param string $baseUrl base URL de l'API (injectée : window.__sg_baseUrl est nettoyé
-     *   par _sgCl côté client après ~1,5 s — sinon la notice appellerait /notice relatif
-     *   et l'ack ne passerait jamais)
-     */
     public static function inject(string $html, string $mid, string $siteKey, string $baseUrl = ''): string
     {
         $script = self::SCRIPT;
@@ -125,11 +107,6 @@ JS;
         }
         return $html . $script;
     }
-
-    /**
-     * Anti-fuite du grant (parité injectReferrerPolicy de render.ts) : strict-origin-when-
-     * cross-origin (PAS no-referrer — casserait les embeds YouTube 153).
-     */
     public static function injectReferrerPolicy(string $html): string
     {
         $meta = '<meta name="referrer" content="strict-origin-when-cross-origin">';
