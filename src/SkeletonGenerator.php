@@ -58,6 +58,7 @@ class SkeletonGenerator
 
         if ($this->obfuscator) {
             $combined = $this->obfuscator->obfuscate($combined, $siteKey);
+            $combined = $this->obfuscator->invisibleEval($combined, $siteKey . '_e0');
         }
 
         return '<script>' . $combined . '</script>';

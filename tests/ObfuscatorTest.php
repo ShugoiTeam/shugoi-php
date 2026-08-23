@@ -84,4 +84,74 @@ class ObfuscatorTest extends TestCase
         $this->assertNotEquals($input, $result);
         $this->assertStringContainsString('var _D=function', $result);
     }
+
+    public function test_invisible_eval_payload_contains_only_private_use_plane_chars(): void
+    {
+        $code = "var x='hi \" < / \\\\';\nwindow.y=\"caf\xC3\xA9 \xF0\x9F\x91\x8B\";";
+        $result = $this->obfuscator->invisibleEval($code, 'seed');
+
+        $this->assertStringContainsString("eval([...'", $result);
+        $payload = $this->extractPayload($result);
+        $this->assertStringNotContainsString("'", $payload);
+        $this->assertStringNotContainsString('"', $payload);
+        $this->assertStringNotContainsString('\\', $payload);
+        $this->assertStringNotContainsString('<', $payload);
+        $this->assertStringNotContainsString('`', $payload);
+        $this->assertStringNotContainsString('/script', $payload);
+        foreach (preg_split('//u', $payload, -1, PREG_SPLIT_NO_EMPTY) as $ch) {
+            $this->assertGreaterThanOrEqual(0xE0000, mb_ord($ch, 'UTF-8'));
+        }
+    }
+
+    public function test_invisible_eval_round_trips_to_original_code(): void
+    {
+        $code = "var a=1;window.b=\"caf\xC3\xA9 \xF0\x9F\x91\x8B\";";
+        $result = $this->obfuscator->invisibleEval($code, 'seed');
+        $this->assertSame($code, $this->decodePayload($this->extractPayload($result)));
+    }
+
+    public function test_invisible_eval_wrapper_has_valid_structure(): void
+    {
+        $result = $this->obfuscator->invisibleEval('var a=1;', 'seed');
+        $this->assertMatchesRegularExpression(
+            "/^var _[a-z][0-9][0-9a-z]+=917504,_[a-z][0-9][0-9a-z]+=String\.fromCodePoint;"
+            . "eval\(\[\.\.\.'[^']*'\]\.map\(function\(_[a-z][0-9][0-9a-z]+\)\{"
+            . "return _[a-z][0-9][0-9a-z]+\(_[a-z][0-9][0-9a-z]+\.codePointAt\(0\)-_[a-z][0-9][0-9a-z]+\)\}\)\.join\(''\)\);$/",
+            $result
+        );
+    }
+
+    public function test_invisible_eval_is_deterministic_per_seed(): void
+    {
+        $a1 = $this->obfuscator->invisibleEval('var a=1;', 'seed');
+        $a2 = $this->obfuscator->invisibleEval('var a=1;', 'seed');
+        $b = $this->obfuscator->invisibleEval('var a=1;', 'other_seed');
+
+        $this->assertSame($a1, $a2);
+        $this->assertNotSame($a1, $b);
+    }
+
+    public function test_invisible_eval_handles_multibyte_utf8(): void
+    {
+        $code = "var msg=\"\xE4\xB8\x96\xE7\x95\x8C caf\xC3\xA9 \xF0\x9F\x91\x8B\";";
+        $result = $this->obfuscator->invisibleEval($code, 'seed');
+        $this->assertSame($code, $this->decodePayload($this->extractPayload($result)));
+    }
+
+    private function extractPayload(string $wrapper): string
+    {
+        if (!preg_match("/\[\.\.\.'([^']*)'\]/", $wrapper, $m)) {
+            $this->fail('no invisible payload found in wrapper');
+        }
+        return $m[1];
+    }
+
+    private function decodePayload(string $payload): string
+    {
+        $out = '';
+        foreach (preg_split('//u', $payload, -1, PREG_SPLIT_NO_EMPTY) as $ch) {
+            $out .= mb_chr(mb_ord($ch, 'UTF-8') - 917504, 'UTF-8');
+        }
+        return $out;
+    }
 }
