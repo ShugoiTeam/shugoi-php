@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 namespace Shugoi;
 
 class Obfuscator
@@ -10,10 +12,72 @@ class Obfuscator
         'stable' => '_wi',
     ];
 
-    public function stripComments(string $code): string
+    // 0xE0000 — start of the (invisible/zero-width) Supplementary Private Use plane.
+    // Every source character is shifted by this offset so the encoded payload only
+    // ever contains code points >= 0xE0000, never ' " \ ` < / or other JS/HTML
+    // metacharacters, so the payload can be delimited by single quotes unescaped.
+    private const SPUA_B_OFFSET = 917504;
+
+    // Max representable code point: source chars above U+2FFFF would overflow
+    // JS String.fromCodePoint (limit 0x10FFFF). The skeleton never contains such
+    // characters; documented as a hard limit in the method doc.
+    private const MAX_SOURCE_CODE_POINT = 0x2FFFF;
+
+public function stripComments(string $code): string
     {
-        $r = preg_replace('/\/\/.*$/m', '', $code);
-        $r = preg_replace('/\/\*[\s\S]*?\*\//', '', $r);
+        $r = '';
+        $len = strlen($code);
+        $i = 0;
+        $inSingle = false;
+        $inDouble = false;
+        while ($i < $len) {
+            $ch = $code[$i];
+            if ($inSingle) {
+                $r .= $ch;
+                if ($ch === '\\') {
+                    $r .= $code[$i + 1] ?? '';
+                    $i += 2;
+                    continue;
+                }
+                if ($ch === "'") $inSingle = false;
+                $i++;
+                continue;
+            }
+            if ($inDouble) {
+                $r .= $ch;
+                if ($ch === '\\') {
+                    $r .= $code[$i + 1] ?? '';
+                    $i += 2;
+                    continue;
+                }
+                if ($ch === '"') $inDouble = false;
+                $i++;
+                continue;
+            }
+            if ($ch === "'") {
+                $inSingle = true;
+                $r .= $ch;
+                $i++;
+                continue;
+            }
+            if ($ch === '"') {
+                $inDouble = true;
+                $r .= $ch;
+                $i++;
+                continue;
+            }
+            if ($ch === '/' && ($code[$i + 1] ?? '') === '/') {
+                while ($i < $len && $code[$i] !== "\n") $i++;
+                continue;
+            }
+            if ($ch === '/' && ($code[$i + 1] ?? '') === '*') {
+                $end = strpos($code, '*/', $i + 2);
+                $i = $end === false ? $len : $end + 2;
+                continue;
+            }
+            $r .= $ch;
+            $i++;
+        }
         $r = preg_replace('/\n{3,}/', "\n\n", $r);
         return $r;
     }
@@ -40,7 +104,7 @@ class Obfuscator
         }
         usort($entries, fn($a, $b) => $a['hash'] <=> $b['hash']);
         foreach ($entries as $entry) {
-            $suffix = base_convert(($entry['hash'] % 9000 + 1000), 10, 36);
+            $suffix = base_convert((string)($entry['hash'] % 9000 + 1000), 10, 36);
             $newName = $entry['to'] . $suffix;
             $r = preg_replace('/\b' . preg_quote($entry['from'], '/') . '\(/', $newName . '(', $r);
         }
@@ -162,6 +226,108 @@ class Obfuscator
         $r = $this->escapeClosingTags($r);
         $r = $this->fixComputedProperties($r);
         return $r;
+    }
+
+    /**
+     * Wraps obfuscated JS into an "invisible eval" payload.
+     *
+     * Every character of $code is shifted by +0xE0000 (917504). The resulting
+     * string contains only code points >= 0xE0000 — i.e. it displays as an
+     * almost-empty line and never contains ', ", \, `, <, / or `</script>`,
+     * so it can be embedded in a single-quoted JS literal without escaping.
+     *
+     * The runtime wrapper is:
+     *   var <off>=917504,<cp>=String.fromCodePoint;
+     *   eval([...'<payload>'].map(function(<it>){
+     *     return <cp>(<it>.codePointAt(0)-<off>)
+     *   }).join(''));
+     *
+     * Identifiers are derived from the seed (seededRng + hash), so the wrapper
+     * rotates per site/seed and cannot be matched by a single static regex.
+     *
+     * Hard limits:
+     *  - source code points must be <= U+2FFFF (encoded <= 0x1F02FF < 0x10FFFF,
+     *    the JS String.fromCodePoint ceiling). The skeleton never exceeds this.
+     *  - encoded payload is ~4x the source size (every code point >= 0x10000 is
+     *    encoded as 4 UTF-8 bytes).
+     *  - requires ES6 (spread, String.fromCodePoint, codePointAt) in the browser.
+     */
+    public function invisibleEval(string $code, string $seed): string
+    {
+        $payload = '';
+        foreach (preg_split('//u', $code, -1, PREG_SPLIT_NO_EMPTY) as $char) {
+            $payload .= $this->chrUtf8($this->ordUtf8($char) + self::SPUA_B_OFFSET);
+        }
+
+        $off = $this->ident($seed, 0);
+        $cp = $this->ident($seed, 1);
+        $item = $this->ident($seed, 2);
+
+        return "var {$off}=917504,{$cp}=String.fromCodePoint;"
+            . "eval([...'{$payload}'].map(function({$item}){"
+            . "return {$cp}({$item}.codePointAt(0)-{$off})}).join(''));";
+    }
+
+    private function ident(string $seed, int $idx): string
+    {
+        $pool = ['_m', '_n', '_p', '_q', '_v', '_w', '_x', '_y', '_z', '_t'];
+        $rng = $this->seededRng($seed . '_ident' . $idx);
+        $base = $pool[(int) floor($rng() * count($pool))];
+        $h = $this->hash($seed . '_ident' . $idx);
+        $suffix = $idx . base_convert((string)($h % 8999 + 1000), 10, 36);
+        return $base . $suffix;
+    }
+
+    private function ordUtf8(string $char): int
+    {
+        if (function_exists('mb_ord')) {
+            return mb_ord($char, 'UTF-8');
+        }
+        if (class_exists('IntlChar')) {
+            return \IntlChar::ord($char);
+        }
+        $b = ord($char[0]);
+        if ($b < 0x80) return $b;
+        $extra = 0;
+        $cp = 0;
+        if (($b & 0xE0) === 0xC0) {
+            $cp = $b & 0x1F;
+            $extra = 1;
+        } elseif (($b & 0xF0) === 0xE0) {
+            $cp = $b & 0x0F;
+            $extra = 2;
+        } elseif (($b & 0xF8) === 0xF0) {
+            $cp = $b & 0x07;
+            $extra = 3;
+        }
+        for ($i = 1; $i <= $extra; $i++) {
+            $cp = ($cp << 6) | (ord($char[$i]) & 0x3F);
+        }
+        return $cp;
+    }
+
+    private function chrUtf8(int $codePoint): string
+    {
+        if (function_exists('mb_chr')) {
+            return mb_chr($codePoint, 'UTF-8');
+        }
+        if (class_exists('IntlChar')) {
+            $s = \IntlChar::chr($codePoint);
+            if ($s !== null && $s !== false) return $s;
+        }
+        if ($codePoint < 0x80) return chr($codePoint);
+        if ($codePoint < 0x800) {
+            return chr(0xC0 | ($codePoint >> 6)) . chr(0x80 | ($codePoint & 0x3F));
+        }
+        if ($codePoint < 0x10000) {
+            return chr(0xE0 | ($codePoint >> 12))
+                . chr(0x80 | (($codePoint >> 6) & 0x3F))
+                . chr(0x80 | ($codePoint & 0x3F));
+        }
+        return chr(0xF0 | ($codePoint >> 18))
+            . chr(0x80 | (($codePoint >> 12) & 0x3F))
+            . chr(0x80 | (($codePoint >> 6) & 0x3F))
+            . chr(0x80 | ($codePoint & 0x3F));
     }
 
     private function hash(string $s): int

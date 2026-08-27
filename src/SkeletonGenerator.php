@@ -1,10 +1,6 @@
 <?php
+declare(strict_types=1);
 namespace Shugoi;
-
-/**
- * Génère le skeleton HTML (bootcode unicode) injecté dans la page — parité avec
- * generateSkeleton (render.ts du module Node). Retourne uniquement <script>…</script>.
- */
 class SkeletonGenerator
 {
     public function __construct(
@@ -29,12 +25,8 @@ class SkeletonGenerator
         $fragments[] = 'window.__sg_siteKey=' . json_encode($siteKey, JSON_UNESCAPED_UNICODE);
         $fragments[] = 'window.__sg_baseUrl=' . json_encode($baseUrl, JSON_UNESCAPED_UNICODE);
         $fragments[] = 'window.__sg_config=' . json_encode($flags);
-        // Mode debug (audit #8) : piloté UNIQUEMENT par le serveur. En production ce flag
-        // est toujours false → le guard n'active jamais ses traces via ?sg_probe_debug=1.
         $fragments[] = 'window.__sg_diagEnabled=' . ($this->isProduction() ? 'false' : 'true');
         $fragments[] = "try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}";
-        // Challenge PoW anti-curl : le guard le résout en JS et l'envoie au wlc.
-        // salt = HMAC(secret, ts) ; difficulté = config (injectée par GuardInjector).
         $powTs = time();
         $powSecret = $this->tokenSigner->secret();
         $powSalt = $powSecret !== '' ? hash_hmac('sha256', (string)$powTs, $powSecret) : '';
@@ -47,7 +39,6 @@ class SkeletonGenerator
         if (!$restrictedAccess) {
             $fragments[] = 'window.__sg_disableRestrictedAccess=true';
         }
-        // Fusion des guards (audit) : seul guard-detect est injecté (parité module Node).
         if (!empty($guards['detect'])) {
             $fragments[] = 'try{' . $guards['detect'] . '}catch(e){window.__sg_blocked=true}';
         }
@@ -63,18 +54,18 @@ class SkeletonGenerator
         $fragments[] = $this->cleanupFragment();
 
         $combined = implode(';', $fragments);
-        // Échappe `</script>` / `</style>` AVANT l'encodage unicode (sinon le HTML parser
-        // coupe le <script> au premier `</script>` du guard-detect obfusqué).
         $combined = preg_replace('#</(script|style)#i', '<\\\\/$1', $combined);
 
         if ($this->obfuscator) {
             $combined = $this->obfuscator->obfuscate($combined, $siteKey);
+            // ⚠️ Couche "invisible eval" (U+E0000, Obfuscator::invisibleEval)
+            // TEMPORAIREMENT RETIRÉE : elle crash WebKit/Safari (bootcode affiché
+            // en <pre> → page morte), confirmé 2× côté SDK Node. Le code est
+            // conservé pour réactivation future — voir AGENTS.md.
+            // $combined = $this->obfuscator->invisibleEval($combined, $siteKey . '_e0');
         }
 
-        $encoded = $this->unicodeEncode($combined);
-        $bootCode = "eval([...'" . $encoded . "'].map(function(x){return String.fromCodePoint(x.codePointAt(0)-917504)}).join(''))";
-
-        return '<script>' . $bootCode . '</script>';
+        return '<script>' . $combined . '</script>';
     }
 
     private function showBlockFragment(array $msgs): string
@@ -93,6 +84,12 @@ class SkeletonGenerator
             . "h2{font-family:\\x27Alex Brush\\x27,Georgia,\\x27Times New Roman\\x27,serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}"
             . '#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}'
             . '#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}'
+            . '@media (prefers-color-scheme:dark){html,body{background:#16101c}'
+            . '#c{background:#241a30;border-color:rgba(241,232,245,.14);box-shadow:0 10px 30px rgba(0,0,0,.4)}'
+            . '#c .bdg{background:rgba(233,137,159,.16);border-color:rgba(233,137,159,.5);color:#e9899f}'
+            . '#c h2{color:#e9899f}'
+            . '#c p.desc{color:#a795b4}'
+            . '#c p.ft{color:#e9899f}}'
             . '</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l>'
             . '<img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||"' . $fbBadge . '")+"</div>'
             . '<h2>"+(title||"' . $fbTitle . '")+"</h2><p class=desc>"+(msg||"")+"</p>'
@@ -123,23 +120,9 @@ class SkeletonGenerator
             . 'window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};'
             . 'window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}';
     }
-
-    /** jsStr : JSON sans guillemets externes + échappe `<` (parité render.ts). */
     private static function jsStr(string $s): string
     {
         return str_replace('<', '\\x3c', substr(json_encode($s, JSON_UNESCAPED_UNICODE), 1, -1));
-    }
-
-    /** Encodage par code unit UTF-16 (parité charCodeAt du module Node). */
-    private function unicodeEncode(string $code): string
-    {
-        $utf16 = mb_convert_encoding($code, 'UTF-16BE', 'UTF-8');
-        $units = unpack('n*', $utf16);
-        $result = '';
-        foreach ($units as $unit) {
-            $result .= mb_chr(917504 + $unit, 'UTF-8');
-        }
-        return $result;
     }
 
     private function isProduction(): bool

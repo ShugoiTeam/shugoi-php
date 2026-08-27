@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 namespace Shugoi;
 
 use Psr\Http\Client\ClientInterface;
@@ -19,7 +21,13 @@ class ApiClient
 
     public function fetchWhitelist(?string $baseUrl = null): array
     {
-        $url = ($baseUrl ?? $this->config->baseUrl) . '/whitelist?key=' . urlencode($this->config->siteKey);
+        $cb = bin2hex(random_bytes(4));
+        try {
+            $sig = hash_hmac('sha256', $cb, $this->config->getSigningSecret());
+        } catch (\RuntimeException) {
+            $sig = '';
+        }
+        $url = ($baseUrl ?? $this->config->baseUrl) . '/whitelist?key=' . urlencode($this->config->siteKey) . '&cb=' . $cb . ($sig !== '' ? '&sig=' . $sig : '');
         $response = $this->http->request('GET', $url);
         $body = json_decode((string)$response->getBody(), true);
         if (!is_array($body)) throw new ShugoiError('unexpected_api_response', 'Whitelist API returned non-JSON');
@@ -28,16 +36,26 @@ class ApiClient
 
     public function fetchGuardDetect(?string $baseUrl = null): string
     {
-        $url = ($baseUrl ?? $this->config->internalUrl) . '/guard-detect?key=' . urlencode($this->config->siteKey) . '&raw=1&cb=' . bin2hex(random_bytes(4));
+        $url = ($baseUrl ?? $this->config->internalUrl) . '/guard-detect?key=' . urlencode($this->config->siteKey) . '&raw=1&cb=' . $this->guardCb();
         $response = $this->http->request('GET', $url);
         return (string)$response->getBody();
     }
 
     public function fetchGuard(?string $baseUrl = null): string
     {
-        $url = ($baseUrl ?? $this->config->internalUrl) . '/guard?key=' . urlencode($this->config->siteKey) . '&raw=1&cb=' . bin2hex(random_bytes(4));
+        $url = ($baseUrl ?? $this->config->internalUrl) . '/guard?key=' . urlencode($this->config->siteKey) . '&raw=1&cb=' . $this->guardCb();
         $response = $this->http->request('GET', $url);
         return (string)$response->getBody();
+    }
+    private function guardCb(): string
+    {
+        $cb = bin2hex(random_bytes(4));
+        try {
+            $sig = hash_hmac('sha256', $cb, $this->config->getSigningSecret());
+        } catch (\RuntimeException) {
+            $sig = '';
+        }
+        return $cb . ($sig !== '' ? '&sig=' . $sig : '');
     }
 
     public function checkRateLimit(string $ip, array $metadata = []): array
@@ -64,7 +82,6 @@ class ApiClient
     {
         $url = $this->config->baseUrl . '/event';
         try {
-            // Parité module Node : le payload attend `reason` (pas `type`).
             $this->http->request('POST', $url, [
                 'json' => array_merge(['siteKey' => $this->config->siteKey, 'reason' => $type], $data),
             ]);

@@ -47,7 +47,6 @@ class NoticeTest extends TestCase
 
     public function test_inject_referrer_policy_without_head(): void
     {
-        // Parité injectReferrerPolicy (render.ts) : meta injecté APRÈS <html>.
         $out = Notice::injectReferrerPolicy('<html><body>x</body></html>');
         $this->assertStringContainsString('<html><meta name="referrer" content="strict-origin-when-cross-origin">', $out);
     }

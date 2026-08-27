@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 
 namespace Shugoi;
 
@@ -29,23 +30,15 @@ class Middleware implements PsrMiddlewareInterface
     {
         $path = $request->getUri()->getPath();
         $method = strtoupper($request->getMethod());
-
-        // Render endpoint — GET/HEAD uniquement (round 13, parité module Node).
         if (str_ends_with($path, '/__shugoi/render')) {
             if (!in_array($method, ['GET', 'HEAD'], true)) {
                 return $this->methodNotAllowed();
             }
             return $this->handleRender($request);
         }
-
-        // Challenge page — GET/HEAD uniquement.
         if ($path === '/__sg_challenge' && !in_array($method, ['GET', 'HEAD'], true)) {
             return $this->methodNotAllowed();
         }
-
-        // SkipPaths (SSR direct) : on laisse l'app servir la page sans challenge ni skeleton.
-        // Parité middleware.ts : le check est AVANT core.evaluate (un skipPath hors allowlist
-        // ne doit PAS passer par le challenge PoW ni la protection des assets).
         if ($this->config->autoInject && $this->config->siteKey !== '') {
             try {
                 $cfg = $this->configCache->get($this->config->internalUrl);
@@ -93,14 +86,10 @@ class Middleware implements PsrMiddlewareInterface
         }
 
         $response = $handler->handle($request);
-
-        // CSP fusionnée avec celle éventuellement posée par l'app (parité middleware.ts).
         if ($this->config->csp) {
             $existing = $response->getHeaderLine('Content-Security-Policy');
             $response = $response->withHeader('Content-Security-Policy', $existing === '' ? $csp : CspBuilder::merge($existing, $csp));
         }
-
-        // PoW validé → pose le cookie __sg_ok (navigations suivantes sans challenge).
         if (isset($query['sg_proof']) && is_string($query['sg_proof'])) {
             $okCookie = $this->pow()->sgOkCookie($query['sg_proof'], $ip, $ua);
             if ($okCookie !== null) {
@@ -146,32 +135,21 @@ class Middleware implements PsrMiddlewareInterface
 
         $headers = ['Content-Type' => 'application/json'];
         if (isset($data['html'])) {
-            // Anti-fuite du grant : strict-origin-when-cross-origin (jamais le grant dans
-            // le Referer cross-origin). Contenu protégé : jamais mis en cache (round 6).
             $headers['Referrer-Policy'] = 'strict-origin-when-cross-origin';
             $headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, no-transform';
             $headers['Pragma'] = 'no-cache';
-            // Cookie __sg_authorized : autorise ensuite le chargement des assets protégés.
             $headers['Set-Cookie'] = $this->pow()->sgAuthorizedCookie();
         }
         return new Response(200, $headers, json_encode($data));
     }
-
-    /** Parité renderResponseData + handleRender (render.ts) — grant + token vérifiés. */
     private function renderData(string $token, string $mid, string $grant, string $ip): array
     {
         $len = strlen($token);
         if ($len < 16 || $len > 300) return ['error' => 'not_found'];
-
-        // CRITIQUE 1 (§7bis) : le render d'un site ne sert que les tokens de SON siteKey.
         $tokSiteKey = explode(':', $token)[0];
         if ($tokSiteKey !== $this->config->siteKey) return ['error' => 'not_found'];
-
-        // Expiration explicite du token (parité render.ts).
         $tokTs = (int)(explode(':', $token)[1] ?? '0');
         if ($tokTs > 0 && $this->nowMs() - $tokTs > TokenSigner::TOKEN_TTL_MS) return ['error' => 'not_found'];
-
-        // Anti-bypass "token-only" : sans grant valide (lié au siteKey), pas de HTML.
         if (!$this->tokenSigner->verifyRenderGrant($mid, $grant, $token, $ip, $this->config->siteKey)) {
             return ['error' => 'not_found'];
         }
@@ -181,8 +159,6 @@ class Middleware implements PsrMiddlewareInterface
         if ($entry !== null && !empty($entry['html'])) {
             return ['html' => $this->postProcessHtml($entry['html'], $mid)];
         }
-
-        // Fallback content-replace OFF : on renvoie le HTML du site déjà stocké.
         if (!$contentReplaceOn) {
             $fresh = $this->htmlStore->hasFreshToken($this->config->siteKey, true);
             if ($fresh !== null && !empty($fresh['html'])) {

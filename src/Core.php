@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 
 namespace Shugoi;
 
@@ -13,10 +14,7 @@ class Core
     private bool $validated = false;
     private bool $validationFailed = false;
     private float $lastValidationWarn = 0;
-
-    /** @var array<string,int> preuves PoW single-use (clé = ip:proof → timestamp) */
     private array $usedProofs = [];
-    /** @var array<string,array{count:int,windowStart:int,blockedUntil:int}> */
     private array $challengeLimits = [];
 
     public static function getBlockPage(): string
@@ -59,8 +57,6 @@ class Core
         }
         if ($this->validationFailed) $this->warnIfValidationFailed(true);
     }
-
-    /** Allowlist : match exact ou préfixe + '/' (parité Node — pas de prefix-match large). */
     public function isAllowlisted(string $path): bool
     {
         foreach ($this->config->allowlist as $prefix) {
@@ -76,11 +72,6 @@ class Core
         }
         return false;
     }
-
-    /**
-     * @param array{path: string, ua: string, ip: string, host?: string, acceptLanguage?: string, secFetchDest?: string, secFetchMode?: string, sgProof?: ?string, sgOk?: ?string, sgAuthorized?: ?string, forwardedPrefix?: ?string} $ctx
-     * @return array|null {block: true, status: int, contentType: string, body: string, headers?: array} or null to allow
-     */
     public function evaluate(array $ctx): ?array
     {
         $this->ensureValidated();
@@ -88,11 +79,6 @@ class Core
         $path = $ctx['path'] ?? '/';
         $ua = $ctx['ua'] ?? '';
         $ip = $ctx['ip'] ?? '';
-
-        // Protection des assets à contenu (/assets/*.js, *.css) — parité core.ts. Le bundle
-        // SPA est téléchargeable publiquement sans ce verrou : on exige le cookie
-        // __sg_authorized posé par handleRender après un render réussi (grant valide).
-        // NB : vérifié AVANT l'allowlist (les assets sont allowlistés pour le split-render).
         if (preg_match('~/assets/[^?#]+\.(js|css)(\?|$)~', $path)) {
             $authOk = !empty($ctx['sgAuthorized']) && $this->pow->isSgAuthorizedValid((string)$ctx['sgAuthorized']);
             if (!$authOk) {
@@ -106,20 +92,14 @@ class Core
         }
 
         if ($this->isAllowlisted($path)) return null;
-
-        // Route du challenge JS (le navigateur arrive ici après le 307).
         if ($path === '/__sg_challenge') {
             return $this->challengePage($ctx);
         }
-
-        // Pre-flight PoW challenge (anti-curl/view-source). S'applique aux navigateurs
-        // (UA Mozilla) sans preuve valide ni cookie __sg_ok (HMAC serveur, 30 j).
         if (!str_contains($path, '/__shugoi/') && !str_starts_with($path, '/api/')) {
             if ($this->pow->secret() !== '') {
                 $proof = (string)($ctx['sgProof'] ?? '');
                 $validProof = $proof !== '' && $this->pow->isValid($proof);
                 $validCookie = !empty($ctx['sgOk']) && $this->pow->isSgOkValid((string)$ctx['sgOk'], $ip, $ua);
-                // Round 16 (R2) : la preuve est SINGLE-USE (par IP) — un rejeu → 307.
                 $proofFresh = $validProof ? $this->consumeProof($proof) : false;
                 if (!$validCookie && !$proofFresh) {
                     if (!$this->allowChallenge($ip)) {
@@ -142,8 +122,6 @@ class Core
 
         $config = $this->configCache?->get($this->config->internalUrl) ?? ['detectionFlags' => []];
         $flags = $config['detectionFlags'] ?? [];
-
-        // Rate limit check — activé uniquement si le flag est explicitement vrai.
         if ($flags['enableRateLimit'] ?? false) {
             $rl = $this->api->checkRateLimit($ip, [
                 'ip' => $ip,
@@ -183,8 +161,6 @@ class Core
                 ];
             }
         }
-
-        // Blocage headless (UA). Actif par défaut, y compris sans configuration chargée.
         $enableHeadless = $flags['enableHeadlessCheck'] ?? true;
         if ($enableHeadless !== false && $ua !== '' && !$this->isTrustedBot($ua, $ip)) {
             foreach ($this->config->headlessPatterns as $pattern) {
@@ -199,9 +175,6 @@ class Core
                 }
             }
         }
-
-        // Fake browser (Sec-Fetch/Accept-Language absents) : NE BLOQUE PLUS en 403 brut
-        // (audit Tor, parité core.ts) — le guard CLIENT gère la détection (Tor → card dédiée).
         return null;
     }
 
@@ -212,8 +185,6 @@ class Core
         $verified = $this->botVerifier->verify($ua, $ip);
         return $verified === null ? false : $verified;
     }
-
-    /** Page challenge (tableau en commentaire + JS PoW inline, comptage de bits corrigé). */
     private function challengePage(array $ctx): array
     {
         $ip = $ctx['ip'] ?? '';
@@ -249,8 +220,6 @@ class Core
         $body = "<!--\n" . self::getBlockPage() . "-->\n<script>" . $js . '</script>';
         return ['block' => true, 'status' => 200, 'contentType' => 'text/html; charset=utf-8', 'body' => $body];
     }
-
-    /** 307 vers le challenge : body = tableau ASCII seul (curl le voit tel quel). */
     private function powChallenge307(array $ctx): array
     {
         $ts = time();
@@ -270,8 +239,6 @@ class Core
             'headers' => ['Location' => $chalUrl],
         ];
     }
-
-    /** Sanitisation open redirect (audit #5) : n'accepte qu'un chemin relatif '/...'. */
     private function safeChallengePath(string $path): string
     {
         if ($path === '') return '/';
@@ -283,8 +250,6 @@ class Core
         }
         return $path;
     }
-
-    /** Anti-scraping : borne par IP l'émission de challenges (quota + backoff exponentiel). */
     private function allowChallenge(string $ip): bool
     {
         if ($ip === '' || $ip === 'unknown') return true;
@@ -308,8 +273,6 @@ class Core
         }
         return true;
     }
-
-    /** Preuve PoW single-use GLOBAL (round 17) — clé = preuve seule (nonce aléatoire unique) → rejeu depuis n'importe quel IP → 307. Entrées purgées après POW_TTL_MS. */
     private function consumeProof(string $proof): bool
     {
         if (isset($this->usedProofs[$proof])) return false;
@@ -331,8 +294,6 @@ class Core
         error_log('[shugoi] La protection reste active, mais cette installation n\'est pas authentifiée.');
         error_log('[shugoi] Vérifiez `siteKey` et `secret` : https://shugoi.com/docs#validation');
     }
-
-    /** Format du temps restant — parité exacte avec core.ts (timeStr). */
     private function formatRemaining(int $seconds): string
     {
         $mins = intdiv($seconds, 60);

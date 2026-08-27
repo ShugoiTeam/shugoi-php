@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace Shugoi\Laravel;
 
 use Illuminate\Support\ServiceProvider;
@@ -33,7 +34,10 @@ class ShugoiServiceProvider extends ServiceProvider
         $this->app->singleton(TokenSigner::class, fn($app) => new TokenSigner($app->make(Config::class)));
         $this->app->singleton(Pow::class, fn($app) => new Pow($app->make(Config::class)));
         $this->app->singleton(CspBuilder::class, fn($app) => new CspBuilder($app->make(Config::class)));
-        $this->app->singleton(SkeletonGenerator::class, fn($app) => new SkeletonGenerator($app->make(TokenSigner::class)));
+        $this->app->singleton(SkeletonGenerator::class, fn($app) => new SkeletonGenerator(
+            $app->make(TokenSigner::class),
+            $app->make(Obfuscator::class),
+        ));
         $this->app->singleton(Core::class, function ($app) {
             $config = $app->make(Config::class);
             $api = $app->make(ApiClient::class);

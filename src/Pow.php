@@ -1,15 +1,7 @@
 <?php
-namespace Shugoi;
+declare(strict_types=1);
 
-/**
- * Proof-of-work anti-curl + cookies HMAC — parité avec core.ts (module Node) :
- *   salt = HMAC(secret, ts + ':' + nonce)   (nonce 64 bits ALEATOIRE par challenge)
- *   proof = "ts:nonce:solution" où SHA256(salt:solution) a >= POW_DIFFICULTY bits à zéro.
- *   __sg_ok        : ts:ipBucket:uaFp:HMAC(secret, "sg_ok:ts:ipBucket:uaFp") — 30 jours,
- *                    lié au bucket IP + empreinte UA (non rejouable depuis une autre IP),
- *                    saute le pre-flight PoW.
- *   __sg_authorized: ts:HMAC(secret, "sg_authorized:ts") — 120 s, protège les assets /assets/*
- */
+namespace Shugoi;
 class Pow
 {
     public function __construct(private readonly Config $config) {}
@@ -32,16 +24,12 @@ class Pow
             return '';
         }
     }
-
-    /** Génère le challenge à injecter (window.__sg_pow). */
     public function challenge(): array
     {
         $ts = time();
         $nonce = $this->nonce();
         return ['ts' => $ts, 'nonce' => $nonce, 'salt' => $this->salt($ts, $nonce), 'difficulty' => $this->difficulty()];
     }
-
-    /** Vérifie un proof "ts:nonce:solution" (fenêtre @ttlMs, comptage de bits CORRIGÉ). */
     public function isValid(string $proof): bool
     {
         if ($proof === '' || $this->secret() === '') return false;
@@ -57,13 +45,6 @@ class Pow
         $digest = hash('sha256', $this->salt($tsStr, $nonce) . ':' . $solution);
         return $this->leadingZeroBits($digest) >= $this->difficulty();
     }
-
-    /**
-     * Nombre de bits à zéro en tête (comptage CORRIGÉ, audit 2026-08-03).
-     * L'ancien comptage (décimal→binaire sans zéros de tête) sous-comptait les zéros
-     * internes du premier nibble non-nul (`3` → '11' → 0 au lieu de 2). Ce comptage est
-     * exact et DOIT rester synchrone avec core.ts (isPowValid), le challenge JS et le guard.
-     */
     public function leadingZeroBits(string $hex): int
     {
         $leading = 0;
@@ -79,8 +60,6 @@ class Pow
         }
         return $leading;
     }
-
-    /** Valeur du cookie __sg_ok (HMAC serveur, 30 j) — lié au bucket IP + empreinte UA. */
     public function sgOkValue(string $ip = '', string $ua = ''): string
     {
         $ts = time();
@@ -100,12 +79,9 @@ class Pow
         if ($ts <= 0) return false;
         if ($this->nowMs() - $ts * 1000 > $this->config->powOkTtlMs) return false;
         if ($ts * 1000 > $this->nowMs() + 60_000) return false;
-        // Lier au bucket IP + UA courants : un cookie d'une autre IP/UA → invalide.
         if ($bucket !== $this->ipBucket($ip) || $fp !== $this->uaFp($ua)) return false;
         return hash_equals(hash_hmac('sha256', "sg_ok:{$tsStr}:{$bucket}:{$fp}", $this->secret()), $sig);
     }
-
-    /** String Set-Cookie pour __sg_ok (posé par le middleware après une preuve valide). */
     public function sgOkCookie(string $proof, string $ip = '', string $ua = ''): ?string
     {
         if (!$this->isValid($proof)) return null;
@@ -150,8 +126,6 @@ class Pow
     {
         return hash_hmac('sha256', $ts . ':' . $nonce, $this->secret());
     }
-
-    /** Bucket d'IP (sans ':' pour rester parseable dans le cookie). IPv4 → /24, IPv6 → 4 hextets. */
     private function ipBucket(string $ip): string
     {
         if ($ip === '' || $ip === 'unknown') return '0';
@@ -164,8 +138,6 @@ class Pow
         $bucket = implode('.', array_slice($segs, 0, 4));
         return $bucket === '' ? '0' : $bucket;
     }
-
-    /** Empreinte UA (16 hex). */
     private function uaFp(string $ua): string
     {
         return substr(hash('sha256', $ua), 0, 16);

@@ -33,14 +33,11 @@ class MiddlewareTest extends TestCase
         ], $configOverrides));
 
         $responses = [];
-        // Parité middleware.ts : le check skipPaths (GET /whitelist) est AVANT
-        // core.evaluate (donc avant validate-key).
         $responses[] = new Response(200, [], json_encode([
             'whitelistedMachines' => [],
             'detectionFlags' => [],
             'skipPaths' => [],
         ]));
-        // validate-key
         $responses[] = new Response(200, [], json_encode(['valid' => true]));
         while (count($responses) < $queueSize) {
             $responses[] = new Response(200, [], json_encode([
@@ -98,7 +95,6 @@ class MiddlewareTest extends TestCase
         $response = $middleware->process($request, $handler);
         $body = json_decode((string)$response->getBody(), true);
         $this->assertArrayHasKey('error', $body);
-        // Parité module Node : le render répond 200 avec { error: "not_found" }.
         $this->assertEquals(200, $response->getStatusCode());
     }
 
@@ -184,14 +180,11 @@ class MiddlewareTest extends TestCase
         $handler->method('handle')->willReturn(new Psr7Response(200, ['Content-Security-Policy' => "default-src 'self'; frame-ancestors 'none'"], ''));
         $response = $middleware->process($request, $handler);
         $csp = $response->getHeaderLine('Content-Security-Policy');
-        // 'none' reste SEUL dans frame-ancestors (spec CSP, parité csp.ts).
         $this->assertMatchesRegularExpression('/frame-ancestors \'none\'/', $csp);
     }
 
     public function test_skip_path_outside_allowlist_passes_without_challenge(): void
     {
-        // Parité middleware.ts : le check skipPaths est AVANT core.evaluate — un skipPath
-        // hors allowlist (ex. /docs) ne reçoit PAS de challenge PoW.
         $config = new Config(['siteKey' => 'sg_sk_test_abc', 'secret' => 'test_secret', 'powDifficulty' => 10]);
         $mock = new MockHandler([
             new Response(200, [], json_encode(['whitelistedMachines' => [], 'detectionFlags' => [], 'skipPaths' => ['/docs']])),

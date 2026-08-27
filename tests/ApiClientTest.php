@@ -61,6 +61,30 @@ class ApiClientTest extends TestCase
         $this->assertEquals('console.log("guard");', $guard);
     }
 
+    public function test_fetch_guard_sends_signed_cb(): void
+    {
+        $mock = new MockHandler([
+            new Response(200, [], 'ok'),
+            new Response(200, [], 'ok'),
+        ]);
+        $handler = HandlerStack::create($mock);
+        $history = [];
+        $client = new GuzzleClient(['handler' => $handler, 'on_stats' => function ($stats) use (&$history) {
+            $history[] = (string)$stats->getEffectiveUri();
+        }]);
+        $api = new ApiClient($this->config, $client);
+
+        $api->fetchGuardDetect();
+        $api->fetchGuard();
+
+        foreach ($history as $url) {
+            $this->assertMatchesRegularExpression('/cb=[0-9a-f]{8}/', $url);
+            $cb = (preg_match('/cb=([0-9a-f]+)/', $url, $m)) ? $m[1] : '';
+            $expected = hash_hmac('sha256', $cb, 'test_secret');
+            $this->assertStringContainsString('sig=' . $expected, $url);
+        }
+    }
+
     public function test_check_rate_limit(): void
     {
         $mock = new MockHandler([

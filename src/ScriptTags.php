@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 namespace Shugoi;
 
 class ScriptTags
@@ -31,9 +33,6 @@ class ScriptTags
             './__shugoi/render',
             $this->config->siteKey
         );
-
-        // Parité scripts.ts du module Node : guardDetect = skeleton, guard vide,
-        // whitelistConfig vide (fusionnée dans le skeleton via __sg_config).
         return [
             'guardDetect' => $skeleton,
             'guard' => '',

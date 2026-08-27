@@ -33,8 +33,6 @@ class ShugoiIntegrationTest extends TestCase
         ]);
         $queue = [];
         $whitelist = ['whitelistedMachines' => [], 'detectionFlags' => [], 'skipPaths' => []];
-        // Parité middleware.ts : le check skipPaths (GET /whitelist) est AVANT
-        // core.evaluate (donc avant validate-key).
         $queue[] = new Response(200, [], json_encode($whitelist));
         $queue[] = new Response(200, [], json_encode(['valid' => true]));
         while (count($queue) < $responses) {
@@ -85,7 +83,8 @@ class ShugoiIntegrationTest extends TestCase
         $response = $middleware->process($request, $handler);
         $this->assertEquals(200, $response->getStatusCode());
         $this->assertStringContainsString('default-src', $response->getHeaderLine('Content-Security-Policy'));
-        $this->assertStringContainsString('eval([...', (string)$response->getBody());
+        $this->assertStringContainsString('window.__sg_siteKey=', (string)$response->getBody());
+        $this->assertStringNotContainsString('eval(', (string)$response->getBody());
     }
 
     public function test_full_flow_curl_blocked(): void
@@ -105,8 +104,6 @@ class ShugoiIntegrationTest extends TestCase
         $middleware = $this->createFullStack();
         $config = new Config(['siteKey' => 'sg_sk_test_abc', 'secret' => 'test_secret', 'powDifficulty' => 10]);
         $proof = $this->solvePow($config, 10);
-
-        // 1. Navigation → skeleton + token stocké.
         $request = new ServerRequest('GET', '/?sg_proof=' . urlencode($proof));
         $request = $request->withHeader('User-Agent', 'Mozilla/5.0 Chrome/120');
         $handler = $this->createMock(RequestHandlerInterface::class);
@@ -115,20 +112,9 @@ class ShugoiIntegrationTest extends TestCase
         $this->assertEquals(200, $response->getStatusCode());
         $skeleton = (string)$response->getBody();
 
-        // Extraction du token depuis le bootcode encodé.
-        preg_match("/'([^']+)'/", $skeleton, $mm);
-        $this->assertNotEmpty($mm[1]);
-        $decoded = '';
-        $len = mb_strlen($mm[1], 'UTF-8');
-        for ($i = 0; $i < $len; $i++) {
-            $cp = mb_ord(mb_substr($mm[1], $i, 1, 'UTF-8'), 'UTF-8');
-            $decoded .= chr($cp - 917504);
-        }
-        preg_match('/window\.__sg_token="([^"]+)"/', $decoded, $tm);
+        preg_match('/window\.__sg_token="([^"]+)"/', $skeleton, $tm);
         $token = $tm[1] ?? null;
         $this->assertNotNull($token);
-
-        // 2. Render avec grant valide.
         $mid = str_repeat('a', 64);
         $ts = time();
         $ts36 = base_convert((string)$ts, 10, 36);
@@ -145,7 +131,6 @@ class ShugoiIntegrationTest extends TestCase
         $data = json_decode((string)$response->getBody(), true);
         $this->assertArrayHasKey('html', $data);
         $this->assertStringContainsString('Hello', $data['html']);
-        // Notice injectée (base URL + overlay) + referrer meta.
         $this->assertStringContainsString('__sg_o', $data['html']);
         $this->assertStringContainsString('name="referrer" content="strict-origin-when-cross-origin"', $data['html']);
     }

@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace Shugoi;
 
 class BotVerifier
@@ -36,8 +37,6 @@ class BotVerifier
         self::$cache[$cacheKey] = ['result' => $result, 'time' => time()];
         return $result;
     }
-
-    // Protégé (et non privé) : testable par les mocks PHPUnit (onlyMethods).
     protected function verifyPtr(string $ip, array $expectedSuffixes): bool
     {
         $ptr = gethostbyaddr($ip);

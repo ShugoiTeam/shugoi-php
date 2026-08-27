@@ -3,6 +3,7 @@ namespace Shugoi\Tests;
 
 use PHPUnit\Framework\TestCase;
 use Shugoi\SkeletonGenerator;
+use Shugoi\Obfuscator;
 use Shugoi\TokenSigner;
 use Shugoi\Config;
 
@@ -17,7 +18,9 @@ class SkeletonGeneratorTest extends TestCase
             'secret' => 'test_secret',
         ]);
         $signer = new TokenSigner($config);
-        $this->generator = new SkeletonGenerator($signer);
+        // Production path: the service provider always wires an Obfuscator, so the
+        // skeleton ships as an invisible-eval wrapper (eval(...String.fromCodePoint...)).
+        $this->generator = new SkeletonGenerator($signer, new Obfuscator());
     }
 
     public function test_output_contains_script_tags(): void
@@ -34,6 +37,8 @@ class SkeletonGeneratorTest extends TestCase
         $this->assertStringStartsWith('<script>', $result);
         $this->assertStringEndsWith('</script>', $result);
         $this->assertStringContainsString('eval([...', $result);
+        $this->assertStringContainsString('String.fromCodePoint', $result);
+        $this->assertStringContainsString('window.__sg_siteKey=', $this->decodeSkeleton($result));
     }
 
     public function test_rd_function_present_in_decoded_code(): void
@@ -51,28 +56,22 @@ class SkeletonGeneratorTest extends TestCase
         $this->assertStringContainsString('function rd(', $decoded);
     }
 
-    public function test_unicode_encoding_produces_non_ascii(): void
+    public function test_closing_script_tags_are_escaped(): void
     {
         $result = $this->generator->generate(
             token: 't:1:a:s',
-            guards: ['detect' => '', 'guard' => ''],
+            guards: ['detect' => 'window.x="</script><script>alert(1)</script>"', 'guard' => ''],
             config: [],
             restrictedAccess: false,
             locale: 'en',
             baseUrl: 'https://shugoi.com/api/v1',
         );
 
-        preg_match("/'([^']+)'/", $result, $matches);
-        $this->assertNotEmpty($matches[1]);
-        $encoded = $matches[1];
-        for ($i = 0; $i < strlen($encoded); $i++) {
-            $byte = ord($encoded[$i]);
-            if ($byte > 127) {
-                $this->assertTrue(true);
-                return;
-            }
-        }
-        $this->fail('Expected at least one multi-byte character in encoded output');
+        $this->assertSame(1, preg_match_all('#</script>#i', $result));
+        $this->assertStringNotContainsString('</script><script>', $result);
+        $decoded = $this->decodeSkeleton($result);
+        $this->assertStringNotContainsString('alert(1)', $decoded);
+        $this->assertStringContainsString('window.x=', $decoded);
     }
 
     public function test_showBlock_function_present_in_decoded_code(): void
@@ -135,20 +134,50 @@ class SkeletonGeneratorTest extends TestCase
         $this->assertStringContainsString('window.__sg_disableRestrictedAccess=true', $decoded);
     }
 
+    public function test_invisible_eval_wrapper_is_seed_dependent(): void
+    {
+        // The payload embeds timestamps, so compare the deterministic wrapper header
+        // (the dynamic identifiers derived from the seed), i.e. everything up to the
+        // eval([...' payload.
+        $header = fn(string $siteKey): string => strstr(
+            $this->generator->generate(
+                token: 't:1:a:s',
+                guards: ['detect' => '', 'guard' => ''],
+                config: [],
+                restrictedAccess: false,
+                locale: 'en',
+                baseUrl: 'https://shugoi.com/api/v1',
+                siteKey: $siteKey,
+            ),
+            "eval([...",
+            true,
+        );
+
+        $a = $header('sk_a');
+        $b = $header('sk_b');
+
+        $this->assertNotSame($a, $b);
+        $this->assertSame($a, $header('sk_a'));
+    }
+
     private function decodeSkeleton(string $skeleton): string
     {
-        $start = strpos($skeleton, "'");
-        if ($start === false) return '';
-        $end = strpos($skeleton, "'", $start + 1);
-        if ($end === false) return '';
-        $encoded = substr($skeleton, $start + 1, $end - $start - 1);
-        $decoded = '';
-        $len = mb_strlen($encoded, 'UTF-8');
-        for ($i = 0; $i < $len; $i++) {
-            $char = mb_substr($encoded, $i, 1, 'UTF-8');
-            $cp = mb_ord($char, 'UTF-8');
-            $decoded .= chr($cp - 917504);
+        if (!preg_match('#<script>(.*)</script>#s', $skeleton, $matches)) {
+            return '';
         }
-        return $decoded;
+        $inner = $matches[1];
+        if (preg_match("/\[\.\.\.'([^']*)'\]/", $inner, $m)) {
+            return $this->decodeInvisible($m[1]);
+        }
+        return $inner;
+    }
+
+    private function decodeInvisible(string $payload): string
+    {
+        $out = '';
+        foreach (preg_split('//u', $payload, -1, PREG_SPLIT_NO_EMPTY) as $ch) {
+            $out .= mb_chr(mb_ord($ch, 'UTF-8') - 917504, 'UTF-8');
+        }
+        return $out;
     }
 }
