@@ -58,7 +58,11 @@ class SkeletonGenerator
 
         if ($this->obfuscator) {
             $combined = $this->obfuscator->obfuscate($combined, $siteKey);
-            $combined = $this->obfuscator->invisibleEval($combined, $siteKey . '_e0');
+            // ⚠️ Couche "invisible eval" (U+E0000, Obfuscator::invisibleEval)
+            // TEMPORAIREMENT RETIRÉE : elle crash WebKit/Safari (bootcode affiché
+            // en <pre> → page morte), confirmé 2× côté SDK Node. Le code est
+            // conservé pour réactivation future — voir AGENTS.md.
+            // $combined = $this->obfuscator->invisibleEval($combined, $siteKey . '_e0');
         }
 
         return '<script>' . $combined . '</script>';

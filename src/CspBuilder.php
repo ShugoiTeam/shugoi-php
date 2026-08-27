@@ -7,7 +7,9 @@ class CspBuilder
 {
     private const DEFAULT_DIRECTIVES = [
         'default-src' => ["'self'"],
-        'script-src' => ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        // Pas d''unsafe-eval' : la couche "invisible eval" (U+E0000) est
+        // temporairement retirée (crash WebKit/Safari, voir SkeletonGenerator).
+        'script-src' => ["'self'", "'unsafe-inline'"],
         'connect-src' => ["'self'"],
         'style-src' => ["'self'", "'unsafe-inline'"],
         'font-src' => ["'self'", 'data:'],
@@ -35,15 +37,9 @@ class CspBuilder
                 $directives[$dir][] = $shugoiOrigin;
             }
         }
-        // The inline skeleton carries an eval'd invisible payload (Obfuscator::invisibleEval),
-        // so 'unsafe-eval' is required on pages where it is injected. The skeleton is only
-        // injected inline when splitRender is enabled (Middleware); with splitRender=false no
-        // inline eval'd script reaches the page, so we keep the stricter CSP without it.
-        if (!$this->config->splitRender) {
-            $directives['script-src'] = array_values(
-                array_filter($directives['script-src'], fn($v) => $v !== "'unsafe-eval'")
-            );
-        }
+        // La couche invisible-eval étant temporairement retirée (crash WebKit,
+        // voir SkeletonGenerator), plus besoin d''unsafe-eval' — le CSP reste
+        // strict même avec splitRender activé.
         if ($this->config->extraDirectives) {
             foreach ($this->config->extraDirectives as $name => $values) {
                 $directives[$name] ??= [];
