@@ -57,6 +57,7 @@ class Config
     public readonly mixed $blockPage;
     public readonly bool $splitRender;
     public readonly bool $multiProcess;
+    public readonly bool $failOpenOnUnavailable;
     public readonly bool $verifyBots;
     public readonly int $powDifficulty;
     public readonly int $powTtlMs;
@@ -85,6 +86,7 @@ class Config
         $this->blockPage = $options['blockPage'] ?? null;
         $this->splitRender = $options['splitRender'] ?? true;
         $this->multiProcess = $options['multiProcess'] ?? false;
+        $this->failOpenOnUnavailable = $options['failOpenOnUnavailable'] ?? false;
         $this->verifyBots = $options['verifyBots'] ?? true;
         // Parité module Node : difficulté PoW 14 par défaut, TTL 60 s, cookie __sg_ok 30 j.
         $this->powDifficulty = $options['powDifficulty'] ?? 14;

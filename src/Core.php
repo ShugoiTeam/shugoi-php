@@ -85,6 +85,10 @@ class Core
     {
         $this->ensureValidated();
 
+        if ($this->config->failOpenOnUnavailable && $this->configCache !== null && !$this->configCache->isAvailable($this->config->internalUrl)) {
+            return null;
+        }
+
         $path = $ctx['path'] ?? '/';
         $ua = $ctx['ua'] ?? '';
         $ip = $ctx['ip'] ?? '';
