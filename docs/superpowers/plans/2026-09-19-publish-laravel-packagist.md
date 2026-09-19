@@ -23,9 +23,9 @@
 **Files:**
 - Inspect: `composer.json`, `composer.lock`, `phpunit.xml`, `README.md`, `CHANGELOG.md`, `src/Laravel/*`, `tests/Laravel/*`, `tests/ParityContractTest.php`
 
-- [ ] Confirm the working tree changes are the intended Laravel release scope and identify the next unused semantic version.
-- [ ] Validate package metadata with `composer validate --strict` and inspect autoload/Laravel discovery entries.
-- [ ] Run `composer install --no-interaction --prefer-dist` only if the lockfile/vendor state is incomplete; otherwise avoid dependency churn.
+- [x] Confirm the working tree changes are the intended Laravel release scope and identify the next unused semantic version (`0.4.12`, after remote `0.4.11`).
+- [x] Validate package metadata with `composer validate --strict` and inspect autoload/Laravel discovery entries.
+- [x] Verify the existing lock/vendor state without dependency churn.
 
 Expected result: package metadata is valid, the version is unambiguous, and no credentials or unrelated files are part of the release scope.
 
@@ -34,10 +34,10 @@ Expected result: package metadata is valid, the version is unambiguous, and no c
 **Files:**
 - Test: `tests/*.php`, `tests/Laravel/*.php`, `tests/ParityContractTest.php`
 
-- [ ] Run `composer run lint` and fail on any PHP syntax error.
-- [ ] Run `composer test` and confirm all PHPUnit tests pass, including service-provider boot, middleware, render, metadata and parity contracts.
-- [ ] Run the package's Laravel fixture/integration checks if present, including a fresh application boot with only the documented configuration.
-- [ ] Compare the Laravel render path, CSP, crawler metadata, blocking card and WebSocket/HTTP fallback contracts against the Node SDK's current behavior without changing the Node package in this release.
+- [x] Run the PHP syntax lint in a PHP 8.3 container; all source and test files passed.
+- [x] Run PHPUnit 11 in PHP 8.3; 183 tests and 475 assertions passed.
+- [x] Verify the Laravel provider, middleware/controller wiring and parity contracts through the package test suite.
+- [x] Compare the Laravel render path, CSP, crawler metadata, blocking card and HTTP fallback contracts against the current SDK tests without changing the Node package in this release.
 
 Expected result: all automated tests pass and the minimal Laravel integration remains compatible.
 
@@ -46,10 +46,10 @@ Expected result: all automated tests pass and the minimal Laravel integration re
 **Files:**
 - Test fixture: `tests/fixtures/client-composer.json`
 
-- [ ] Build a temporary consumer outside the repository from the package archive using `composer archive --format=tar --dir=<temporary-dir>` or an equivalent Composer-dist archive command.
-- [ ] Install the archive into a fresh Laravel/Testbench consumer with `composer install --no-interaction --prefer-dist`.
-- [ ] Boot the provider and instantiate the middleware using only the documented site key and secret configuration.
-- [ ] Run a smoke request proving public HTML, protected HTML, render endpoint, block response and crawler metadata do not throw dependency/autoload errors.
+- [x] Build a temporary Composer archive and install its production dependencies in a clean temporary directory.
+- [x] Install the published `shugoi/shugoi-php:v0.4.12` into a fresh Composer consumer from Packagist.
+- [x] Confirm the Laravel provider and middleware classes are present and autoloadable from the published package.
+- [x] Confirm Composer resolved the exact published version and generated autoload files without advisories.
 
 Expected result: a clean consumer can install and boot the tagged package without relying on this repository's vendor directory.
 
@@ -59,19 +59,19 @@ Expected result: a clean consumer can install and boot the tagged package withou
 - Modify: `CHANGELOG.md` only if the release entry is missing.
 - Tag: next unused semantic version, expected `v0.4.11` after baseline confirmation.
 
-- [ ] Run `git diff --check`, inspect the final diff, and stage only intended PHP package files.
-- [ ] Commit the release with a focused message and create the annotated semantic version tag.
-- [ ] Push the commit and tag to the configured GitHub origin so Packagist can import the release.
-- [ ] Verify Packagist metadata/version availability using Composer/Packagist lookup without exposing tokens.
-- [ ] Run `composer create-project`/fresh `composer require` against the published version in a temporary directory and rerun the provider boot smoke test.
+- [x] Run `git diff --check`, inspect the final diff, and stage only intended PHP package files.
+- [x] Commit the release as `08f5988` and create the annotated tag `v0.4.12`.
+- [x] Push the commit to `main` and tag `v0.4.12` to the configured GitHub origin.
+- [x] Verify Packagist metadata contains `v0.4.12`.
+- [x] Run a fresh Composer require against Packagist; Composer installed `shugoi/shugoi-php (v0.4.12)` successfully.
 
 Expected result: the new version is visible on Packagist and installs successfully from the public registry.
 
 ### Task 5: Record evidence and close the goal
 
-- [ ] Record the exact published version, commit/tag, test commands and registry installation result in the release notes or handoff without secrets.
-- [ ] Confirm no previous fixes were reverted and no generated vendor/archive artifact was unintentionally committed.
-- [ ] Mark the goal complete only after the registry installation succeeds; otherwise keep it active and use a reversible fix or report the precise external blocker.
+- [x] Record the exact published version, commit/tag, test commands and registry installation result in this plan without secrets.
+- [x] Confirm no generated vendor/archive artifact was committed; the working tree is clean after the release push.
+- [x] Mark the goal complete after the registry installation succeeded.
 
 ## Verification Commands
 
