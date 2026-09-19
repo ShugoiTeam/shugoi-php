@@ -99,7 +99,8 @@ class CspBuilderTest extends TestCase
         $csp = new CspBuilder($config);
         $result = $csp->build();
 
-        $this->assertStringContainsString("script-src 'self' 'unsafe-inline' 'unsafe-eval' https://shugoi.com", $result);
+        $this->assertStringContainsString("script-src 'self' 'unsafe-inline' https://shugoi.com", $result);
+        $this->assertStringNotContainsString("'unsafe-eval'", $result);
     }
 
     public function testMergeDeduplicatesValues(): void

@@ -10,11 +10,12 @@ Shugoi is a full-featured anti-abuse protection layer for PHP applications. It c
 - **Edge blocking** — Headless browser detection (curl, wget, python, puppeteer, etc.), fake browser detection (missing Sec-Fetch headers), rate limiting with configurable thresholds
 - **Client-side fingerprinting** — Tor Browser detection, VM/machine detection, anti-detect browser detection, headless Chrome/Puppeteer detection via Web Worker
 - **Whitelist** — machineId-based whitelist managed from the Shugoi dashboard, bypasses all client-side checks
-- **Split-render** — Original HTML is stored server-side with a signed single-use token; the client receives an eval bootcode skeleton. Guards run, and if the browser is legitimate, `rd()` fetches the real HTML via `/__shugoi/render`
+- **Split-render** — Original HTML is stored server-side with a signed single-use token; the client receives a bootstrap skeleton. Guards run, and if the browser is legitimate, `rd()` fetches the real HTML via the same-origin `/__shugoi/render` endpoint. The PHP package deliberately uses this signed HTTP fallback: a PSR-15 middleware cannot accept a WebSocket upgrade without a separate long-lived server integration.
+- **Crawler metadata isolation** — Recognized crawler user agents receive only an escaped document containing the original page's title, description, OpenGraph/Twitter tags and canonical link. The protected page body is never returned to this branch; FCrDNS remains required for any trusted-bot access decision.
 - **Content replacement detection** — If the render endpoint is called with an invalid/consumed token and `enableContentReplacementCheck` is enabled, a block card "Remplacement de contenu client détecté" is shown with full neobrutalist styling
 - **CSP injection** — Automatic Content-Security-Policy header with proper origins for scripts, fonts, images; optionally extensible via `extraDirectives`
 - **Bot verification** — Reverse DNS (FCrDNS) verification for Googlebot, Bingbot, YandexBot, Applebot, etc.
-- **Obfuscation** — The eval bootcode is obfuscated (function renaming, line shuffling, XOR string encryption, decoder injection) before Unicode encoding
+- **Obfuscation** — The bootstrap is obfuscated (function renaming, line shuffling, XOR string encryption and decoder injection) without the retired invisible-eval wrapper
 - **Block page** — Full neobrutalist shield page with Alex Brush font, favicon + brand images, pink h2, noise SVG background, countdown timer for rate limits. Consistent ASCII block page for non-browser clients
 - **Multi-process support** — Shared disk-based HTML token storage for PHP built-in server, Laravel Octane, or any multi-worker setup
 - **PSR-15 middleware** — Framework-agnostic, compatible with any PSR-15 implementation
@@ -139,7 +140,7 @@ For Laravel with a persistent process (Octane, Swoole), the in-memory store work
 1. **Request arrives** → Middleware evaluates the request (UA, headers, IP, rate limits)
 2. **If blocked** → Returns `BLOCKED BY SHUGOI` (text for bots) or shield page (HTML for browsers)
 3. **If allowed** → Injects guard scripts into the HTML response
-4. **Split-render** → Original HTML is stored with a signed token; the client receives an eval bootcode skeleton
+4. **Split-render** → Original HTML is stored with a signed token; the client receives an obfuscated bootstrap skeleton
 5. **Client boots** → Guards run fingerprinting (Tor, VM, headless, anti-detect checks)
 6. **If guards pass** → `rd()` fetches `/__shugoi/render?token=...` to get the real HTML
 7. **If guards detect issue** → `__sg_showBlock()` displays a neobrutalist card with block reason
@@ -176,9 +177,9 @@ When `detectionFlags.enableContentReplacementCheck` is:
 
 ## Internal route
 
-The middleware serves `/__shugoi/render` which returns stored HTML by token. This route MUST be excluded from the Shugoi middleware to avoid recursion.
+The middleware serves `/__shugoi/render` itself and returns stored HTML only after token, grant, site and expiry validation. Laravel uses the same `RenderService` through its adapter/controller; do not exclude this route from the Shugoi middleware.
 
-For Laravel, we already handle this in the ServiceProvider. For standalone, add the route before the middleware.
+For Laravel, the ServiceProvider and adapter handle this route. For standalone PSR-15 usage, keep the middleware in the request chain so it can handle the route before the application handler.
 
 ## Testing
 

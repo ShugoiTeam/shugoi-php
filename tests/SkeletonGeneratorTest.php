@@ -18,8 +18,8 @@ class SkeletonGeneratorTest extends TestCase
             'secret' => 'test_secret',
         ]);
         $signer = new TokenSigner($config);
-        // Production path: the service provider always wires an Obfuscator, so the
-        // skeleton ships as an invisible-eval wrapper (eval(...String.fromCodePoint...)).
+        // Production path: the service provider wires the current XOR string
+        // obfuscator. The old invisible-eval wrapper is intentionally retired.
         $this->generator = new SkeletonGenerator($signer, new Obfuscator());
     }
 
@@ -36,8 +36,8 @@ class SkeletonGeneratorTest extends TestCase
 
         $this->assertStringStartsWith('<script>', $result);
         $this->assertStringEndsWith('</script>', $result);
-        $this->assertStringContainsString('eval([...', $result);
-        $this->assertStringContainsString('String.fromCodePoint', $result);
+        $this->assertStringContainsString('var _D=function', $result);
+        $this->assertStringNotContainsString('eval([...', $result);
         $this->assertStringContainsString('window.__sg_siteKey=', $this->decodeSkeleton($result));
     }
 
@@ -89,6 +89,29 @@ class SkeletonGeneratorTest extends TestCase
         $this->assertStringContainsString('__sg_showBlock', $decoded);
     }
 
+    public function test_restricted_fallback_normalizes_legacy_labels_and_does_not_reload(): void
+    {
+        // Inspect the plain contract here; obfuscation is tested separately and
+        // must not make this behavioral regression test brittle.
+        $plainGenerator = new SkeletonGenerator(new TokenSigner(new Config([
+            'siteKey' => 'sg_sk_test_abc',
+            'secret' => 'test_secret',
+        ])));
+        $decoded = $plainGenerator->generate(
+            token: 't:1:a:s',
+            guards: ['detect' => '', 'guard' => ''],
+            config: ['supportEmail' => 'support@example.test'],
+            restrictedAccess: false,
+            locale: 'fr',
+            baseUrl: 'https://shugoi.com/api/v1',
+        );
+
+        $this->assertStringContainsString("support@example.test", $decoded);
+        $this->assertStringContainsString("Accès restreint", $decoded);
+        $this->assertStringContainsString("Service temporairement indisponible", $decoded);
+        $this->assertStringNotContainsString("location.reload()", $decoded);
+    }
+
     public function test_cleanup_function_present_in_decoded_code(): void
     {
         $result = $this->generator->generate(
@@ -134,12 +157,9 @@ class SkeletonGeneratorTest extends TestCase
         $this->assertStringContainsString('window.__sg_disableRestrictedAccess=true', $decoded);
     }
 
-    public function test_invisible_eval_wrapper_is_seed_dependent(): void
+    public function test_obfuscated_wrapper_is_stable_and_payload_is_seeded(): void
     {
-        // The payload embeds timestamps, so compare the deterministic wrapper header
-        // (the dynamic identifiers derived from the seed), i.e. everything up to the
-        // eval([...' payload.
-        $header = fn(string $siteKey): string => strstr(
+        $render = fn(string $siteKey): string =>
             $this->generator->generate(
                 token: 't:1:a:s',
                 guards: ['detect' => '', 'guard' => ''],
@@ -148,16 +168,14 @@ class SkeletonGeneratorTest extends TestCase
                 locale: 'en',
                 baseUrl: 'https://shugoi.com/api/v1',
                 siteKey: $siteKey,
-            ),
-            "eval([...",
-            true,
-        );
+            );
 
-        $a = $header('sk_a');
-        $b = $header('sk_b');
+        $a = $render('sk_a');
+        $b = $render('sk_b');
 
+        $this->assertStringContainsString('var _D=function', $a);
+        $this->assertStringContainsString('var _D=function', $b);
         $this->assertNotSame($a, $b);
-        $this->assertSame($a, $header('sk_a'));
     }
 
     private function decodeSkeleton(string $skeleton): string

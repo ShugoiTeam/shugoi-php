@@ -24,6 +24,7 @@ class Middleware implements PsrMiddlewareInterface
         private readonly GuardInjector $injector,
         private readonly TokenSigner $tokenSigner,
         private readonly ?Pow $pow = null,
+        private readonly ?RenderService $renderService = null,
     ) {}
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
@@ -86,6 +87,25 @@ class Middleware implements PsrMiddlewareInterface
         }
 
         $response = $handler->handle($request);
+        if ($this->isMetadataCrawlerDocument($path, $ua)) {
+            $originalBody = (string)$response->getBody();
+            $metadataBody = MetadataOnly::extract($originalBody, (string)$request->getUri());
+            if ($metadataBody === '') {
+                $metadataBody = MetadataOnly::fallback((string)$request->getUri());
+            }
+            $stream = $response->getBody();
+            $stream->rewind();
+            $stream->write($metadataBody);
+            $stream->truncate($stream->tell());
+            $response = $response
+                ->withHeader('Content-Type', 'text/html; charset=UTF-8')
+                ->withHeader('Cache-Control', 'public, max-age=300');
+            if ($method === 'HEAD') {
+                $stream->rewind();
+                $stream->truncate(0);
+            }
+            return $response;
+        }
         if ($this->config->csp) {
             $existing = $response->getHeaderLine('Content-Security-Policy');
             $response = $response->withHeader('Content-Security-Policy', $existing === '' ? $csp : CspBuilder::merge($existing, $csp));
@@ -131,7 +151,7 @@ class Middleware implements PsrMiddlewareInterface
         $grant = (string)($params['grant'] ?? '');
         $ip = $this->clientIp($request);
 
-        $data = $this->renderData($token, $mid, $grant, $ip);
+        $data = ($this->renderService ?? new RenderService($this->config, $this->htmlStore, $this->tokenSigner, $this->configCache))->render($token, $mid, $grant, $ip);
 
         $headers = ['Content-Type' => 'application/json'];
         if (isset($data['html'])) {
@@ -142,63 +162,6 @@ class Middleware implements PsrMiddlewareInterface
         }
         return new Response(200, $headers, json_encode($data));
     }
-    private function renderData(string $token, string $mid, string $grant, string $ip): array
-    {
-        $len = strlen($token);
-        if ($len < 16 || $len > 300) return ['error' => 'not_found'];
-        $tokSiteKey = explode(':', $token)[0];
-        if ($tokSiteKey !== $this->config->siteKey) return ['error' => 'not_found'];
-        $tokTs = (int)(explode(':', $token)[1] ?? '0');
-        if ($tokTs > 0 && $this->nowMs() - $tokTs > TokenSigner::TOKEN_TTL_MS) return ['error' => 'not_found'];
-        if (!$this->tokenSigner->verifyRenderGrant($mid, $grant, $token, $ip, $this->config->siteKey)) {
-            return ['error' => 'not_found'];
-        }
-
-        $contentReplaceOn = $this->contentReplaceOn();
-        $entry = $this->htmlStore->retrieve($token);
-        if ($entry !== null && !empty($entry['html'])) {
-            return ['html' => $this->postProcessHtml($entry['html'], $mid)];
-        }
-        if (!$contentReplaceOn) {
-            $fresh = $this->htmlStore->hasFreshToken($this->config->siteKey, true);
-            if ($fresh !== null && !empty($fresh['html'])) {
-                return ['html' => $this->postProcessHtml($fresh['html'], $mid)];
-            }
-            $diskPath = '/tmp/shugoi-render-shared';
-            if (is_dir($diskPath)) {
-                $files = glob($diskPath . '/*');
-                if (!empty($files)) {
-                    $html = file_get_contents($files[0]);
-                    if ($html !== false && $html !== '') {
-                        return ['html' => $this->postProcessHtml($html, $mid)];
-                    }
-                }
-            }
-        }
-
-        return ['error' => 'not_found'];
-    }
-
-    private function postProcessHtml(string $html, string $mid): string
-    {
-        if ($mid !== '') {
-            $html = Notice::inject($html, $mid, $this->config->siteKey, $this->config->baseUrl);
-        }
-        $html = Notice::injectReferrerPolicy($html);
-        return $html;
-    }
-
-    private function contentReplaceOn(): bool
-    {
-        try {
-            $cfg = $this->configCache->get($this->config->internalUrl);
-            $ecr = $cfg['enableContentReplacementCheck'] ?? $cfg['detectionFlags']['enableContentReplacementCheck'] ?? null;
-            return $ecr === true;
-        } catch (\Throwable) {
-            return false;
-        }
-    }
-
     private function pow(): Pow
     {
         return $this->pow ?? new Pow($this->config);
@@ -227,8 +190,10 @@ class Middleware implements PsrMiddlewareInterface
         return new Response(405, ['Content-Type' => 'application/json'], json_encode(['error' => 'method_not_allowed']));
     }
 
-    private function nowMs(): int
+    private function isMetadataCrawlerDocument(string $path, string $ua): bool
     {
-        return (int)(microtime(true) * 1000);
+        if ($path === '' || str_starts_with($path, '/api/') || str_starts_with($path, '/__shugoi/') || str_starts_with($path, '/__sg_')) return false;
+        if (preg_match('/\.(?:css|js|mjs|map|json|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|otf|txt|xml)$/i', $path)) return false;
+        return preg_match('/(?:Googlebot|Google-InspectionTool|bingbot|Discordbot|Twitterbot|facebookexternalhit)\b/i', $ua) === 1;
     }
 }

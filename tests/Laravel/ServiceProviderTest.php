@@ -5,6 +5,10 @@ use Orchestra\Testbench\TestCase;
 use Shugoi\Laravel\ShugoiServiceProvider;
 use Shugoi\Config;
 use Shugoi\Core;
+use Shugoi\Middleware;
+use Shugoi\RenderService;
+use Shugoi\Laravel\ShugoiController;
+use Illuminate\Http\Request;
 
 class ServiceProviderTest extends TestCase
 {
@@ -30,5 +34,22 @@ class ServiceProviderTest extends TestCase
     {
         $core = $this->app->make(Core::class);
         $this->assertInstanceOf(Core::class, $core);
+    }
+
+    public function test_laravel_uses_shared_render_service_and_middleware(): void
+    {
+        $this->assertInstanceOf(RenderService::class, $this->app->make(RenderService::class));
+        $this->assertInstanceOf(Middleware::class, $this->app->make(Middleware::class));
+        $this->assertSame($this->app->make(RenderService::class), $this->app->make(RenderService::class));
+    }
+
+    public function test_laravel_render_controller_uses_the_shared_contract(): void
+    {
+        $response = $this->app->make(ShugoiController::class)->render(
+            Request::create('/__shugoi/render?token=invalid', 'GET')
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(['error' => 'not_found'], $response->getData(true));
     }
 }

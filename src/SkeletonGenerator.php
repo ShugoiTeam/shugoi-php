@@ -43,7 +43,7 @@ class SkeletonGenerator
             $fragments[] = 'try{' . $guards['detect'] . '}catch(e){window.__sg_blocked=true}';
         }
 
-        $fragments[] = $this->showBlockFragment($msgs);
+        $fragments[] = $this->showBlockFragment($msgs, (string)($config['supportEmail'] ?? 'support@shugoi.com'));
         $fragments[] = 'var t=' . json_encode($token);
         $fragments[] = 'window.__sg_token=' . json_encode($token);
         $fragments[] = 'var k=' . json_encode($siteKey);
@@ -68,11 +68,15 @@ class SkeletonGenerator
         return '<script>' . $combined . '</script>';
     }
 
-    private function showBlockFragment(array $msgs): string
+    private function showBlockFragment(array $msgs, string $supportEmail): string
     {
         $fbBadge = self::jsStr($msgs['blockedBadge']);
         $fbTitle = self::jsStr($msgs['blockedTitle']);
-        return 'window.__sg_showBlock=function(msg,title,badge){var h='
+        $restrictedTitle = self::jsStr($msgs['restrictedTitle']);
+        $restrictedBody = self::jsStr(sprintf($msgs['restrictedBody'], '<strong style="color:#c2546f">' . ($supportEmail !== '' ? $supportEmail : 'support@shugoi.com') . '</strong>'));
+        return 'window.__sg_showBlock=function(msg,title,badge){'
+            . 'if((msg==="Accès restreint"||msg==="Restricted Access")&&/n\\\'est pas autorisé|not authorized/i.test(String(title||""))){var _sgMid=(window.__sg_detectMid||window.__sg_mid||"");msg="' . $restrictedBody . '"+( _sgMid?" <code style=\\"font-size:.7rem\\">"+_sgMid+"</code>":"");title="' . $restrictedTitle . '"}'
+            . 'var h='
             . '"<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><style>'
             . "@font-face{font-family:\\x27Alex Brush\\x27;src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\\x27woff2\\x27);font-display:swap}"
             . '*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}'
@@ -111,7 +115,7 @@ class SkeletonGenerator
             . 'if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}'
             . 'if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' . $devtools . '","' . $tamperTitle . '")}'
             . 'else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}})'
-            . '.catch(function(){setTimeout(function(){rd(p,n+1)},300)})}';
+            . '.catch(function(){window.__sg_showBlock&&window.__sg_showBlock("' . self::jsStr($msgs['renderFailedBody']) . '","' . self::jsStr($msgs['serviceUnavailableTitle']) . '")})}';
     }
 
     private function cleanupFragment(): string

@@ -43,7 +43,7 @@ class BlockPage
             . $htmlTitle . ' · Shugoi</title><style>'
             . $fontFace . $cssBody . $cssCard . $cssLogo . $cssBrand . $cssBdg . $cssH2 . $cssDesc
             . '</style></head><body><div id=c>'
-            . '<img src=https://shugoi.com/favicon.png alt class=l><img src=https://shugoi.com/brand.png alt class=b>'
+            . '<img src=https://shugoi.com/favicon-block.png alt class=l><img src=https://shugoi.com/brand-block.png alt=Shugoi class=b>'
             . '<div class=bdg>' . $htmlBadge . '</div>'
             . '<h2>' . $htmlTitle . '</h2>'
             . '<p class=desc>' . $htmlDesc . '</p>'
@@ -54,7 +54,7 @@ class BlockPage
 
     private static function countdownScript(int $totalSeconds): string
     {
-        return '<script>var s=' . $totalSeconds . ';var i=setInterval(function(){s--;var e=document.getElementById("sg-countdown");if(e){if(s<=0){e.innerHTML="0s";clearInterval(i);setTimeout(function(){location.reload()},500)}else{e.innerHTML=s+"s"}}},1000)</script>';
+        return '<script>var s=' . $totalSeconds . ';var i=setInterval(function(){s--;var e=document.getElementById("sg-countdown");if(e){if(s<=0){e.innerHTML="0s";clearInterval(i)}else{e.innerHTML=s+"s"}}},1000)</script>';
     }
 
     public static function blocked(array $ctx): string

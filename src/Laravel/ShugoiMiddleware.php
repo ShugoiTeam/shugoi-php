@@ -14,9 +14,6 @@ class ShugoiMiddleware
 
     public function handle(Request $request, Closure $next): mixed
     {
-        if (str_starts_with($request->path(), '__shugoi/')) {
-            return $next($request);
-        }
         $psrFactory = new Psr17Factory();
         $uri = $psrFactory->createUri($request->fullUrl());
         $headers = $request->headers->all();

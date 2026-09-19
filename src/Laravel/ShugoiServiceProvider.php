@@ -17,6 +17,7 @@ use Shugoi\BotVerifier;
 use Shugoi\Pow;
 use Shugoi\Middleware;
 use Shugoi\ScriptTags;
+use Shugoi\RenderService;
 use Shugoi\Laravel\Commands\ShugoiSetupCommand;
 use Shugoi\Laravel\Commands\ShugoiCheckCommand;
 
@@ -33,6 +34,12 @@ class ShugoiServiceProvider extends ServiceProvider
         $this->app->singleton(HtmlStore::class, fn($app) => new HtmlStore($app->make(Config::class)->multiProcess));
         $this->app->singleton(TokenSigner::class, fn($app) => new TokenSigner($app->make(Config::class)));
         $this->app->singleton(Pow::class, fn($app) => new Pow($app->make(Config::class)));
+        $this->app->singleton(RenderService::class, fn($app) => new RenderService(
+            $app->make(Config::class),
+            $app->make(HtmlStore::class),
+            $app->make(TokenSigner::class),
+            $app->make(ConfigCache::class),
+        ));
         $this->app->singleton(CspBuilder::class, fn($app) => new CspBuilder($app->make(Config::class)));
         $this->app->singleton(SkeletonGenerator::class, fn($app) => new SkeletonGenerator(
             $app->make(TokenSigner::class),
@@ -65,6 +72,7 @@ class ShugoiServiceProvider extends ServiceProvider
                 injector: $app->make(GuardInjector::class),
                 tokenSigner: $app->make(TokenSigner::class),
                 pow: $app->make(Pow::class),
+                renderService: $app->make(RenderService::class),
             );
         });
         $this->app->singleton(ScriptTags::class, function ($app) {
