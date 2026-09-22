@@ -45,7 +45,15 @@ class Middleware implements PsrMiddlewareInterface
                 $cfg = $this->configCache->get($this->config->internalUrl);
                 $skip = $cfg['skipPaths'] ?? [];
                 if (in_array($path, $skip, true)) {
-                    return $handler->handle($request);
+                    $response = $handler->handle($request);
+                    $contentType = $response->getHeaderLine('Content-Type');
+                    $body = (string)$response->getBody();
+                    if (($contentType === '' || str_contains($contentType, 'text/html')) && str_contains($body, '<html')) {
+                        $body = $this->injector->injectSkipNavigationGuard($body, $skip);
+                        $response->getBody()->rewind();
+                        $response->getBody()->write($body);
+                    }
+                    return $response;
                 }
             } catch (\Throwable) {
             }

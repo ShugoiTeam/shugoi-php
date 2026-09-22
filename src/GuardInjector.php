@@ -13,6 +13,14 @@ class GuardInjector
         private readonly ?SkeletonGenerator $skeletonGenerator = null,
     ) {}
 
+    public function injectSkipNavigationGuard(string $html, array $skipPaths): string
+    {
+        if (!preg_match('/<(?:!doctype\s+html|html\b)/i', $html) || str_contains($html, 'data-shugoi-skip-navigation')) return $html;
+        $paths = json_encode(array_values($skipPaths), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $script = '<script data-shugoi-skip-navigation>(function(s){function skip(p){return s.indexOf(p)>=0}function leave(u){try{var n=new URL(u,location.href);if(n.origin===location.origin&&!skip(n.pathname)){location.assign(n.href);return true}}catch(e){}return false}var p=history.pushState,r=history.replaceState;history.pushState=function(){if(arguments.length>2&&leave(arguments[2]))return;return p.apply(this,arguments)};history.replaceState=function(){if(arguments.length>2&&leave(arguments[2]))return;return r.apply(this,arguments)};window.addEventListener("popstate",function(){if(!skip(location.pathname))location.reload()});document.addEventListener("click",function(e){if(e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;var n=e.target;while(n&&n.nodeType===1&&n.tagName!=="A")n=n.parentNode;if(!n||n.tagName!=="A"||n.target&&n.target!=="_self"||n.hasAttribute("download"))return;if(leave(n.href))e.preventDefault()},true)})('.$paths.');</script>';
+        return preg_replace('/<\/body\s*>/i', $script . '</body>', $html, 1) ?? ($html . $script);
+    }
+
     public function inject(string $html, string $path, string $ua, string $ip, string $host, ?string $acceptLanguage = null, string $renderUrl = ''): string
     {
         $guards = $this->guardCache->get();
