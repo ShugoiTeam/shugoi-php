@@ -70,7 +70,7 @@ class GuardInjectorTest extends TestCase
 
         $apiMock = $this->createMock(ApiClient::class);
         $apiMock->method('getConfig')->willReturn($config);
-        $apiMock->method('fetchGuardDetect')->willReturn('');
+        $apiMock->method('fetchGuardDetect')->willReturn('console.log("detect");');
         $apiMock->method('fetchGuard')->willReturn('');
         $apiMock->method('fetchWhitelist')->willReturn([
             'whitelistedMachines' => [],
@@ -92,5 +92,18 @@ class GuardInjectorTest extends TestCase
         );
 
         $this->assertStringContainsString('<script>', $result);
+    }
+
+    public function test_missing_detection_guard_fails_before_storing_html(): void
+    {
+        $config = new Config(['siteKey' => 'test', 'secret' => 'test-secret']);
+        $api = $this->createMock(ApiClient::class);
+        $api->method('fetchGuardDetect')->willReturn('');
+        $api->method('fetchGuard')->willReturn('');
+        $store = $this->createMock(HtmlStore::class);
+        $store->expects($this->never())->method('store');
+        $injector = new GuardInjector($config, new TokenSigner($config), $store, new GuardCache($api), new ConfigCache($api));
+        $this->expectException(\RuntimeException::class);
+        $injector->inject('<html>private</html>', '/', '', '', 'example.com');
     }
 }

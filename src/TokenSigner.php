@@ -15,6 +15,7 @@ class TokenSigner
     public function sign(int $timestamp, ?string $secretOverride = null): string
     {
         $secret = $secretOverride ?? $this->config->getSigningSecret();
+        if ($secret === '') throw new \RuntimeException('No signing secret configured');
         $nonce = bin2hex(random_bytes(8));
         $payload = $this->config->siteKey . ':' . $timestamp . ':' . $nonce;
         $sig = hash_hmac('sha256', $payload, $secret);
@@ -23,10 +24,21 @@ class TokenSigner
 
     public function verify(string $token, ?string $secretOverride = null): ?array
     {
-        $secret = $secretOverride ?? $this->config->getSigningSecret();
+        try {
+            $secret = $secretOverride ?? $this->config->getSigningSecret();
+        } catch (\RuntimeException) {
+            return null;
+        }
+        if ($secret === '' || strlen($token) > 300) return null;
         $parts = explode(':', $token);
         if (count($parts) !== 4) return null;
         [$siteKey, $timestamp, $nonce, $sig] = $parts;
+        if ($siteKey !== $this->config->siteKey
+            || !preg_match('/\A[1-9][0-9]{0,12}\z/D', $timestamp)
+            || !preg_match('/\A[a-f0-9]{16}\z/D', $nonce)
+            || !preg_match('/\A[a-f0-9]{64}\z/D', $sig)) return null;
+        $age = $this->nowMs() - (int)$timestamp;
+        if ($age > self::TOKEN_TTL_MS || $age < -5000) return null;
         $payload = $siteKey . ':' . $timestamp . ':' . $nonce;
         $expected = hash_hmac('sha256', $payload, $secret);
         if (!hash_equals($expected, $sig)) return null;
@@ -55,22 +67,22 @@ class TokenSigner
         try {
             $secret = $this->config->getSigningSecret();
         } catch (\RuntimeException) {
-            return true; // fail-safe : pas de secret configuré → pas de vérification
+            return false;
         }
-        if ($secret === '') return true;
+        if ($secret === '') return false;
         if ($grant === null || $grant === '' || $mid === null || $mid === '') return false;
-        if (!preg_match('/^[a-f0-9]{64}$/', $mid)) return false;
-
-        $sep = strpos($grant, ':');
-        if ($sep < 0) return false;
-        $ts = substr($grant, 0, $sep);
-        $sig = substr($grant, $sep + 1);
+        if (!preg_match('/\A[a-f0-9]{64}\z/D', $mid)) return false;
+        if (!preg_match('/\A([1-9a-z][0-9a-z]{0,8}):([a-f0-9]{64})\z/D', $grant, $parts)) return false;
+        if ($expectedSiteKey !== $this->config->siteKey || $this->verify($token) === null) return false;
+        [, $ts, $sig] = $parts;
         $tsSec = (int)base_convert($ts, 36, 10);
         if ($tsSec <= 0) return false;
-        if (($this->nowMs() - $tsSec * 1000) > self::GRANT_TTL_MS) return false;
-        if ($expectedSiteKey === null || $expectedSiteKey === '') return false;
+        $age = $this->nowMs() - $tsSec * 1000;
+        if ($age > self::GRANT_TTL_MS || $age < -5000) return false;
 
-        $payload = 'render-grant:' . implode(':', [$expectedSiteKey, $mid, $token, $ip, $ts]);
+        // The current protocol binds the tenant, machine and exact document.
+        // Keep $ip in the public API for callers of earlier SDK versions.
+        $payload = 'render-grant:' . implode(':', [$expectedSiteKey, $mid, $token, $ts]);
         $expected = hash_hmac('sha256', $payload, $secret);
         return hash_equals($expected, $sig);
     }

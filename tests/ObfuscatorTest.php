@@ -59,6 +59,42 @@ class ObfuscatorTest extends TestCase
         $this->assertStringNotContainsString('"hello world"', $result);
     }
 
+    public function test_encryption_preserves_regex_quotes_and_character_classes(): void
+    {
+        $code = <<<'JS'
+var match = /n\'est pas autorisé|not authorized/i.test("not authorized");
+if (match) /['"/*]+/.test("quoted");
+var divided = 12 / 3 / 2;
+JS;
+        $result = $this->obfuscator->encryptStrings($code, 'test_seed');
+        $this->assertStringContainsString("/n\\'est pas autorisé|not authorized/i", $result);
+        $this->assertStringContainsString('/[\'"/*]+/', $result);
+        $this->assertStringContainsString('12 / 3 / 2', $result);
+        $this->assertStringNotContainsString('"not authorized"', $result);
+    }
+
+    public function test_templates_and_embedded_comments_are_preserved(): void
+    {
+        $code = <<<'JS'
+var text = `apostrophe ' // /* ${`nested ${"value"}`} */`;
+var pattern = /['"/*]+/;
+// remove this comment
+var value = "encrypt me";
+JS;
+        $stripped = $this->obfuscator->stripComments($code);
+        $result = $this->obfuscator->encryptStrings($stripped, 'test_seed');
+        $this->assertStringContainsString('`apostrophe \' // /* ${`nested ${"value"}`} */`', $result);
+        $this->assertStringContainsString('/[\'"/*]+/', $result);
+        $this->assertStringNotContainsString('remove this comment', $result);
+        $this->assertStringNotContainsString('"encrypt me"', $result);
+    }
+
+    public function test_comment_removal_keeps_token_boundaries_and_line_terminators(): void
+    {
+        $this->assertSame('var value = typeof value;', $this->obfuscator->stripComments('var value = typeof/**/value;'));
+        $this->assertSame("return\nvalue;", $this->obfuscator->stripComments("return/*\ncomment */value;"));
+    }
+
     public function test_inject_decoder_adds_D_function(): void
     {
         $result = $this->obfuscator->injectDecoder('test_seed');

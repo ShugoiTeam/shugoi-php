@@ -10,7 +10,8 @@ Shugoi is a full-featured anti-abuse protection layer for PHP applications. It c
 - **Edge blocking** — Headless browser detection (curl, wget, python, puppeteer, etc.), fake browser detection (missing Sec-Fetch headers), rate limiting with configurable thresholds
 - **Client-side fingerprinting** — Tor Browser detection, VM/machine detection, anti-detect browser detection, headless Chrome/Puppeteer detection via Web Worker
 - **Whitelist** — machineId-based whitelist managed from the Shugoi dashboard, bypasses all client-side checks
-- **Split-render** — Original HTML is stored server-side with a signed single-use token; the client receives a bootstrap skeleton. Guards run, and if the browser is legitimate, `rd()` fetches the real HTML via the same-origin `/__shugoi/render` endpoint. The PHP package deliberately uses this signed HTTP fallback: a PSR-15 middleware cannot accept a WebSocket upgrade without a separate long-lived server integration.
+- **Split-render** - Original HTML stays server-side behind an exact, single-use signed token. Browser detection exchanges use WebSocket; a signed grant releases HTML through the same-origin `/__shugoi/render` endpoint.
+- **WebSocket proof of work** - A separate PHP CLI gateway issues and verifies the preflight challenge. The browser receives a signed receipt bound to its IP and user agent; PHP consumes it once before setting its admission cookie.
 - **Crawler metadata isolation** — Recognized crawler user agents receive only an escaped document containing the original page's title, description, OpenGraph/Twitter tags and canonical link. The protected page body is never returned to this branch; FCrDNS remains required for any trusted-bot access decision.
 - **Content replacement detection** — If the render endpoint is called with an invalid/consumed token and `enableContentReplacementCheck` is enabled, a block card "Remplacement de contenu client détecté" is shown with full neobrutalist styling
 - **CSP injection** — Automatic Content-Security-Policy header with proper origins for scripts, fonts, images; optionally extensible via `extraDirectives`
@@ -59,7 +60,7 @@ Verify:
 php artisan shugoi:setup
 ```
 
-Done. All HTTP requests are now protected.
+Configure and start the [PHP WebSocket gateway](docs/websocket-gateway.md), including the Nginx upgrade route and matching environment. The protected browser flow requires this service; PHP-FPM alone does not accept WebSocket upgrades.
 
 ## Demo
 
@@ -88,11 +89,11 @@ use Nyholm\Psr7\Response;
 
 $config = new Config([
     'siteKey' => 'sg_sk_live_xxx',
-    'secret' => '80a320ee3904...',
-    'allowlist' => ['/api', '/__shugoi'],
+    'secret' => getenv('SHUGOI_SECRET'),
+    'allowlist' => ['/api'],
     'autoInject' => true,
     'csp' => true,
-    'verifyBots' => false,
+    'verifyBots' => true,
 ]);
 
 $api = new ApiClient($config);
@@ -101,7 +102,8 @@ $guardCache = new GuardCache($api);
 $htmlStore = new HtmlStore('/tmp/shugoi-render-shared');
 $tokenSigner = new TokenSigner($config);
 $cspBuilder = new CspBuilder($config);
-$core = new Core($config, $api, $configCache);
+$pow = new \Shugoi\Pow($config);
+$core = new Core($config, $api, $pow, $configCache, new \Shugoi\BotVerifier());
 $injector = new GuardInjector($config, $tokenSigner, $htmlStore, $guardCache, $configCache);
 
 $middleware = new Middleware(
@@ -111,9 +113,10 @@ $middleware = new Middleware(
     injector: $injector, tokenSigner: $tokenSigner,
 );
 
-$request = new ServerRequest('GET', '/', getallheaders(), file_get_contents('php://input'), '1.1', $_SERVER);
+$request = new ServerRequest($_SERVER['REQUEST_METHOD'], $_SERVER['REQUEST_URI'], getallheaders(), file_get_contents('php://input'), '1.1', $_SERVER);
+$request = $request->withQueryParams($_GET)->withCookieParams($_COOKIE);
 
-$handler = new class($uri) implements \Psr\Http\Server\RequestHandlerInterface {
+$handler = new class implements \Psr\Http\Server\RequestHandlerInterface {
     public function handle(\Psr\Http\Message\ServerRequestInterface $request): \Psr\Http\Message\ResponseInterface
     {
         return new Response(200, ['Content-Type' => 'text/html'], '<html><body>OK</body></html>');
@@ -125,31 +128,27 @@ $response = $middleware->process($request, $handler);
 
 ### Important: Shared disk store
 
-When using the PHP built-in server (new process per request), the HtmlStore must use a SHARED disk path so tokens persist across requests:
+With PHP-FPM, the built-in server, or multiple workers, HtmlStore must use a private shared disk path so tokens survive across requests:
 
 ```php
 $htmlStore = new HtmlStore('/tmp/shugoi-render-shared');
 ```
 
-For Laravel with a persistent process (Octane, Swoole), the in-memory store works.
+Laravel defaults to a site-scoped storage directory. In-memory storage is only suitable when all requests reach the same persistent instance. See the [gateway setup](docs/websocket-gateway.md) for the shared receipt directory and trusted proxy configuration.
 
 ## How it works
 
 ### Request flow
 
-1. **Request arrives** → Middleware evaluates the request (UA, headers, IP, rate limits)
-2. **If blocked** → Returns `BLOCKED BY SHUGOI` (text for bots) or shield page (HTML for browsers)
-3. **If allowed** → Injects guard scripts into the HTML response
-4. **Split-render** → Original HTML is stored with a signed token; the client receives an obfuscated bootstrap skeleton
-5. **Client boots** → Guards run fingerprinting (Tor, VM, headless, anti-detect checks)
-6. **If guards pass** → `rd()` fetches `/__shugoi/render?token=...` to get the real HTML
-7. **If guards detect issue** → `__sg_showBlock()` displays a neobrutalist card with block reason
+1. The middleware blocks configured non-browser user agents and applies rate limits.
+2. A browser without a valid admission cookie receives a verification page, without protected content.
+3. The browser obtains and solves a challenge over `/__sg_challenge/ws`. No raw proof is accepted over HTTP.
+4. The gateway returns a signed, short-lived receipt. The application consumes it atomically and redirects to the clean URL with an HttpOnly admission cookie.
+5. The application stores its HTML and sends a bootstrap containing the Shugoi guard and WebSocket transport hooks.
+6. The guard obtains its signed WLC decision and render grant over the Shugoi API WebSocket.
+7. The same-origin render endpoint verifies token, tenant, grant and expiry, then consumes the exact HTML once.
 
-### Content Replacement Check
-
-When `detectionFlags.enableContentReplacementCheck` is:
-- **`true`** (default) — If the render token is invalid/expired, the block card "Remplacement de contenu client détecté" is shown
-- **`false`** — The render endpoint skips token validation and returns any available stored HTML
+Invalid, expired and consumed render tokens are always refused, including when `enableContentReplacementCheck` is disabled. This flag never permits a fallback to another stored page. A user-agent filter or PoW alone cannot prove that a client is human; the signed render decision remains required.
 
 ## Configuration reference
 
@@ -165,8 +164,11 @@ When `detectionFlags.enableContentReplacementCheck` is:
 | `internalUrl` | string | `baseUrl` | Internal URL for server-to-server calls |
 | `autoInject` | bool | `true` | Auto-inject guard scripts |
 | `csp` | bool | `true` | Enable CSP header |
-| `splitRender` | bool | `true` | Enable skeleton/eval injection |
-| `multiProcess` | bool | `false` | Disk-based HTML storage for PM2 |
+| `splitRender` | bool | `true` | Enable guarded bootstrap injection |
+| `multiProcess` | bool | `false` | Shared HTML storage (Laravel defaults to true) |
+| `renderStorePath` | string | site-scoped in Laravel | Private shared HTML directory |
+| `powWebSocketUrl` | string | `/__sg_challenge/ws` | Public PoW gateway URL |
+| `powReceiptStorePath` | string | site-scoped temporary directory | Private shared consumed-receipt directory |
 | `verifyBots` | bool | `true` | Reverse DNS bot verification |
 | `debug` | bool | `false` | Console logs |
 | `restrictedAccess` | bool | `false` | Show restricted block page |

@@ -8,6 +8,7 @@ use Shugoi\Config;
 use Shugoi\ApiClient;
 use Shugoi\ConfigCache;
 use Shugoi\Pow;
+use Shugoi\PowReceipt;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Response;
@@ -116,10 +117,10 @@ class CoreTest extends TestCase
             'ip' => '1.2.3.4',
         ]);
         $this->assertNotNull($result);
-        $this->assertEquals(307, $result['status']);
+        $this->assertEquals(200, $result['status']);
     }
 
-    public function test_browser_without_proof_gets_307_challenge(): void
+    public function test_browser_without_receipt_gets_same_url_websocket_challenge(): void
     {
         $core = $this->makeCore();
         $result = $core->evaluate([
@@ -131,11 +132,15 @@ class CoreTest extends TestCase
             'secFetchMode' => 'navigate',
         ]);
         $this->assertNotNull($result);
-        $this->assertEquals(307, $result['status']);
-        $this->assertStringContainsString('/__sg_challenge', $result['headers']['Location']);
+        $this->assertEquals(200, $result['status']);
+        $this->assertArrayNotHasKey('Location', $result['headers']);
+        $this->assertSame('no-store', $result['headers']['Cache-Control']);
+        $this->assertStringContainsString('new WebSocket', $result['body']);
+        $this->assertStringContainsString('pow-start', $result['body']);
+        $this->assertStringNotContainsString('fetch(', $result['body']);
     }
 
-    public function test_browser_with_valid_proof_passes(): void
+    public function test_raw_http_proof_cannot_admit_a_browser(): void
     {
         $config = new Config(['siteKey' => 'sg_sk_test_abc', 'secret' => 'test_secret', 'powDifficulty' => 10]);
         $mock = new MockHandler([
@@ -157,7 +162,9 @@ class CoreTest extends TestCase
             'secFetchMode' => 'navigate',
             'sgProof' => $proof,
         ]);
-        $this->assertNull($result);
+        $this->assertSame(200, $result['status']);
+        $this->assertStringContainsString('new WebSocket', $result['body']);
+        $this->assertArrayNotHasKey('Set-Cookie', $result['headers']);
     }
 
     public function test_sg_ok_cookie_skips_preflight(): void
@@ -181,7 +188,7 @@ class CoreTest extends TestCase
         $this->assertNull($result);
     }
 
-    public function test_proof_is_single_use(): void
+    public function test_websocket_receipt_is_single_use_and_cleans_up_navigation(): void
     {
         $config = new Config(['siteKey' => 'sg_sk_test_abc', 'secret' => 'test_secret', 'powDifficulty' => 10]);
         $mock = new MockHandler([
@@ -192,15 +199,21 @@ class CoreTest extends TestCase
         $api = new ApiClient($config, $http);
         $core = new Core($config, $api, new Pow($config), new ConfigCache($api));
 
-        $proof = $this->solvePow($config, 10);
-        $ctx = ['path' => '/', 'ua' => 'Mozilla/5.0 Chrome/120', 'ip' => '1.2.3.4', 'sgProof' => $proof];
-        $this->assertNull($core->evaluate($ctx));
+        $receipt = (new PowReceipt($config))->issue('1.2.3.4', 'Mozilla/5.0 Chrome/120');
+        $ctx = ['path' => '/account', 'requestTarget' => '/account?tab=settings', 'secure' => true,
+            'ua' => 'Mozilla/5.0 Chrome/120', 'ip' => '1.2.3.4', 'sgReceipt' => $receipt];
+        $first = $core->evaluate($ctx);
+        $this->assertSame(303, $first['status']);
+        $this->assertSame('/account?tab=settings', $first['headers']['Location']);
+        $this->assertStringContainsString('__sg_ok=', $first['headers']['Set-Cookie']);
+        $this->assertStringContainsString('; HttpOnly; SameSite=Lax;', $first['headers']['Set-Cookie']);
+        $this->assertStringContainsString('; Secure', $first['headers']['Set-Cookie']);
         $second = $core->evaluate($ctx);
         $this->assertNotNull($second);
-        $this->assertEquals(307, $second['status']);
-        $crossIp = $core->evaluate(['path' => '/', 'ua' => 'Mozilla/5.0 Chrome/120', 'ip' => '9.9.9.9', 'sgProof' => $proof]);
+        $this->assertEquals(200, $second['status']);
+        $crossIp = $core->evaluate(['path' => '/', 'ua' => 'Mozilla/5.0 Chrome/120', 'ip' => '9.9.9.9', 'sgReceipt' => $receipt]);
         $this->assertNotNull($crossIp);
-        $this->assertEquals(307, $crossIp['status']);
+        $this->assertEquals(200, $crossIp['status']);
     }
 
     public function test_challenge_page_served(): void
@@ -213,7 +226,7 @@ class CoreTest extends TestCase
         ]);
         $this->assertEquals(200, $result['status']);
         $this->assertStringContainsString('crypto.subtle', $result['body']);
-        $this->assertStringContainsString('(b&8)?0:(b&4)?1:(b&2)?2:3', $result['body']);
+        $this->assertStringContainsString('Math.clz32(digest[i]) - 24', $result['body']);
     }
 
     public function test_assets_blocked_without_authorized_cookie(): void
@@ -283,7 +296,7 @@ class CoreTest extends TestCase
         $api = new ApiClient($config, $http);
         $core = new Core($config, $api, new Pow($config), new ConfigCache($api));
 
-        $result = $core->evaluate(['path' => '/x', 'ua' => '', 'ip' => '1.2.3.4', 'acceptLanguage' => 'en', 'sgOk' => (new Pow($config))->sgOkValue('1.2.3.4', '')]);
+        $result = $core->evaluate(['path' => '/x', 'ua' => 'Mozilla/5.0', 'ip' => '1.2.3.4', 'acceptLanguage' => 'en', 'sgOk' => (new Pow($config))->sgOkValue('1.2.3.4', 'Mozilla/5.0')]);
         $this->assertNotNull($result);
         $this->assertEquals(429, $result['status']);
         $this->assertStringContainsString('CUSTOM:rate_limit:90', $result['body']);
@@ -300,7 +313,7 @@ class CoreTest extends TestCase
         $api = new ApiClient($config, $http);
         $core = new Core($config, $api, new Pow($config), new ConfigCache($api));
 
-        $result = $core->evaluate(['path' => '/x', 'ua' => '', 'ip' => '1.2.3.4', 'acceptLanguage' => 'en', 'sgOk' => (new Pow($config))->sgOkValue('1.2.3.4', '')]);
+        $result = $core->evaluate(['path' => '/x', 'ua' => 'Mozilla/5.0', 'ip' => '1.2.3.4', 'acceptLanguage' => 'en', 'sgOk' => (new Pow($config))->sgOkValue('1.2.3.4', 'Mozilla/5.0')]);
         $this->assertNull($result);
     }
 
@@ -347,5 +360,62 @@ class CoreTest extends TestCase
         $body = json_decode((string)$event['request']->getBody(), true);
         $this->assertEquals('headless', $body['reason']);
         $this->assertArrayNotHasKey('type', $body);
+    }
+
+    public function test_curl_and_missing_user_agent_are_blocked_before_receiving_a_challenge(): void
+    {
+        foreach (['curl/8.0', 'wget/1.0', ''] as $ua) {
+            $result = $this->makeCore()->evaluate(['path' => '/', 'ua' => $ua, 'ip' => '203.0.113.5']);
+            $this->assertSame(403, $result['status']);
+            $this->assertStringNotContainsString('pow-start', $result['body']);
+            $this->assertSame('no-store', $result['headers']['Cache-Control']);
+        }
+    }
+
+    public function test_disabling_headless_check_still_requires_websocket_admission(): void
+    {
+        $mock = new MockHandler([
+            new Response(200, [], json_encode(['valid' => true])),
+            new Response(200, [], json_encode(['detectionFlags' => ['enableHeadlessCheck' => false]])),
+        ]);
+        $result = $this->makeCore([], $mock)->evaluate(['path' => '/', 'ua' => 'curl/8.0', 'ip' => '203.0.113.5']);
+        $this->assertSame(200, $result['status']);
+        $this->assertStringContainsString('new WebSocket', $result['body']);
+        $this->assertArrayNotHasKey('Set-Cookie', $result['headers']);
+    }
+
+    public function test_missing_secret_fails_closed_and_plain_http_websocket_route_cannot_admit(): void
+    {
+        $ctx = ['path' => '/', 'ua' => 'Mozilla/5.0', 'ip' => '203.0.113.5'];
+        foreach ([null, ''] as $secret) {
+            $this->assertSame(503, $this->makeCore(['secret' => $secret])->evaluate($ctx)['status']);
+        }
+        $result = $this->makeCore()->evaluate(['path' => '/__sg_challenge/ws'] + $ctx);
+        $this->assertSame(426, $result['status']);
+        $this->assertArrayNotHasKey('Set-Cookie', $result['headers']);
+    }
+
+    public function test_post_and_head_do_not_consume_admission_receipts(): void
+    {
+        $config = $this->makeConfig();
+        $receipt = (new PowReceipt($config))->issue('203.0.113.5', 'Mozilla/5.0');
+        $ctx = ['path' => '/account', 'ua' => 'Mozilla/5.0', 'ip' => '203.0.113.5', 'sgReceipt' => $receipt];
+        $core = $this->makeCore();
+        $this->assertSame(403, $core->evaluate(['method' => 'POST'] + $ctx)['status']);
+        $this->assertSame(200, $core->evaluate(['method' => 'HEAD'] + $ctx)['status']);
+        $this->assertSame(303, $core->evaluate(['method' => 'GET'] + $ctx)['status']);
+    }
+
+    public function test_receipt_navigation_rejects_external_or_unsafe_redirect_targets(): void
+    {
+        $config = $this->makeConfig();
+        $core = $this->makeCore();
+        foreach (['https://attacker.invalid', '//attacker.invalid', '/\\attacker.invalid', "/ok\r\nHeader: value"] as $target) {
+            $receipt = (new PowReceipt($config))->issue('203.0.113.5', 'Mozilla/5.0');
+            $result = $core->evaluate(['path' => '/account', 'requestTarget' => $target,
+                'ua' => 'Mozilla/5.0', 'ip' => '203.0.113.5', 'sgReceipt' => $receipt]);
+            $this->assertSame(303, $result['status']);
+            $this->assertSame('/', $result['headers']['Location']);
+        }
     }
 }

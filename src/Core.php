@@ -5,7 +5,6 @@ namespace Shugoi;
 
 class Core
 {
-    private const POW_TTL_MS = 60_000;
     private const CHALLENGE_LIMIT = 60;
     private const CHALLENGE_WINDOW_MS = 60_000;
     private const CHALLENGE_MAX_BLOCK_MS = 15 * 60 * 1000;
@@ -14,7 +13,6 @@ class Core
     private bool $validated = false;
     private bool $validationFailed = false;
     private float $lastValidationWarn = 0;
-    private array $usedProofs = [];
     private array $challengeLimits = [];
 
     public static function getBlockPage(): string
@@ -92,36 +90,44 @@ class Core
         }
 
         if ($this->isAllowlisted($path)) return null;
-        if ($path === '/__sg_challenge') {
-            return $this->challengePage($ctx);
-        }
-        if (!str_contains($path, '/__shugoi/') && !str_starts_with($path, '/api/')) {
-            if ($this->pow->secret() !== '') {
-                $proof = (string)($ctx['sgProof'] ?? '');
-                $validProof = $proof !== '' && $this->pow->isValid($proof);
-                $validCookie = !empty($ctx['sgOk']) && $this->pow->isSgOkValid((string)$ctx['sgOk'], $ip, $ua);
-                $proofFresh = $validProof ? $this->consumeProof($proof) : false;
-                if (!$validCookie && !$proofFresh) {
-                    if (!$this->allowChallenge($ip)) {
-                        $locale = LocaleResolver::resolve($this->config->locale, $ctx['acceptLanguage'] ?? null);
-                        return [
-                            'block' => true,
-                            'status' => 429,
-                            'contentType' => 'text/html; charset=utf-8',
-                            'body' => BlockPage::rateLimit([
-                                'locale' => $locale,
-                                'remainingSeconds' => 60,
-                                'host' => $ctx['host'] ?? null,
-                            ]),
-                        ];
-                    }
-                    return $this->powChallenge307($ctx);
-                }
-            }
-        }
-
         $config = $this->configCache?->get($this->config->internalUrl) ?? ['detectionFlags' => []];
         $flags = $config['detectionFlags'] ?? [];
+        if (($flags['enableHeadlessCheck'] ?? true) !== false && !$this->isTrustedBot($ua, $ip)) {
+            $headless = $ua === '';
+            foreach ($this->config->headlessPatterns as $pattern) {
+                if (preg_match($pattern, $ua)) $headless = true;
+            }
+            if ($headless) {
+                $this->api->sendEvent('headless');
+                return ['block' => true, 'status' => $this->config->blockStatus,
+                    'contentType' => 'text/plain; charset=utf-8', 'body' => self::getBlockPage(),
+                    'headers' => ['Cache-Control' => 'no-store']];
+            }
+        }
+        if ($this->pow->secret() === '') {
+            return ['block' => true, 'status' => 503, 'contentType' => 'text/plain; charset=utf-8',
+                'body' => 'Shugoi signing secret is not configured.', 'headers' => ['Cache-Control' => 'no-store']];
+        }
+        if ($path === '/__sg_challenge/ws') {
+            return ['block' => true, 'status' => 426, 'contentType' => 'text/plain; charset=utf-8',
+                'body' => 'WebSocket gateway required.', 'headers' => ['Cache-Control' => 'no-store']];
+        }
+        $receipt = $ctx['sgReceipt'] ?? '';
+        if (($ctx['method'] ?? 'GET') === 'GET' && is_string($receipt) && $receipt !== ''
+            && (new PowReceipt($this->config))->consume($receipt, $ip, $ua)) {
+            $secure = ($ctx['secure'] ?? false) ? '; Secure' : '';
+            return ['block' => true, 'status' => 303, 'contentType' => 'text/plain; charset=utf-8', 'body' => '',
+                'headers' => [
+                    'Location' => $this->safeChallengePath($ctx['requestTarget'] ?? $path),
+                    'Cache-Control' => 'no-store', 'Referrer-Policy' => 'no-referrer',
+                    'Set-Cookie' => '__sg_ok=' . $this->pow->sgOkValue($ip, $ua)
+                        . '; Path=/; HttpOnly; SameSite=Lax; Max-Age=' . intdiv($this->config->powOkTtlMs, 1000) . $secure,
+                ]];
+        }
+        $validCookie = !empty($ctx['sgOk']) && $this->pow->isSgOkValid((string)$ctx['sgOk'], $ip, $ua);
+        if (!$validCookie) {
+            return $this->challengePage($ctx);
+        }
         if ($flags['enableRateLimit'] ?? false) {
             $rl = $this->api->checkRateLimit($ip, [
                 'ip' => $ip,
@@ -161,27 +167,13 @@ class Core
                 ];
             }
         }
-        $enableHeadless = $flags['enableHeadlessCheck'] ?? true;
-        if ($enableHeadless !== false && $ua !== '' && !$this->isTrustedBot($ua, $ip)) {
-            foreach ($this->config->headlessPatterns as $pattern) {
-                if (preg_match($pattern, $ua)) {
-                    $this->api->sendEvent('headless');
-                    return [
-                        'block' => true,
-                        'status' => $this->config->blockStatus,
-                        'contentType' => 'text/plain; charset=utf-8',
-                        'body' => self::getBlockPage(),
-                    ];
-                }
-            }
-        }
         return null;
     }
 
     public function isTrustedBot(string $ua, string $ip): bool
     {
         if (!$this->isWhitelistedBot($ua)) return false;
-        if ($this->botVerifier === null) return true;
+        if ($this->botVerifier === null) return !$this->config->verifyBots;
         $verified = $this->botVerifier->verify($ua, $ip);
         return $verified === null ? false : $verified;
     }
@@ -201,43 +193,21 @@ class Core
                 ]),
             ];
         }
-        $js = '(function(){'
-            . 'var P=new URLSearchParams(location.search);'
-            . "var salt=P.get('salt')||'', ts=P.get('ts')||'', nonce=P.get('nonce')||'', diff=parseInt(P.get('diff')||'" . $this->config->powDifficulty . "',10), path=P.get('path')||'/';"
-            . 'if(path.charAt(0)!==\'/\'||path.charAt(1)===\'/\'||path.indexOf(\'\\\\\')>=0)path=\'/\';'
-            . 'var enc=new TextEncoder();'
-            . 'function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}l+=(b&8)?0:(b&4)?1:(b&2)?2:3;break}return l}'
-            . 'var n=0;'
-            . 'function step(){'
-            . "crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){"
-            . "var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');"
-            . "if(bits(h)>=diff){var base=path;var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+nonce+':'+n.toString(16);location.replace(base+q)}"
-            . 'else{n++;if(n<300000)step()}'
-            . '}).catch(function(){location.reload()});'
-            . '}'
-            . 'step();'
-            . '})();';
-        $body = "<!--\n" . self::getBlockPage() . "-->\n<script>" . $js . '</script>';
-        return ['block' => true, 'status' => 200, 'contentType' => 'text/html; charset=utf-8', 'body' => $body];
-    }
-    private function powChallenge307(array $ctx): array
-    {
-        $ts = time();
-        $nonce = bin2hex(random_bytes(8));
-        $salt = hash_hmac('sha256', $ts . ':' . $nonce, $this->pow->secret());
-        $prefix = (string)($ctx['forwardedPrefix'] ?? '');
-        if ($prefix === '/' || $prefix === '') $prefix = '';
-        $prefix = rtrim($prefix, '/');
-        $path = $this->safeChallengePath($ctx['path'] ?? '/');
-        $chalUrl = $prefix . '/__sg_challenge?ts=' . $ts . '&salt=' . $salt
-            . '&nonce=' . $nonce . '&diff=' . $this->config->powDifficulty . '&path=' . rawurlencode($prefix . $path);
-        return [
-            'block' => true,
-            'status' => 307,
-            'contentType' => 'text/plain; charset=utf-8',
-            'body' => self::getBlockPage(),
-            'headers' => ['Location' => $chalUrl],
-        ];
+        if (($ctx['method'] ?? 'GET') !== 'GET' && ($ctx['method'] ?? 'GET') !== 'HEAD') {
+            return ['block' => true, 'status' => 403, 'contentType' => 'text/plain; charset=utf-8',
+                'body' => 'Complete browser verification before submitting this request.',
+                'headers' => ['Cache-Control' => 'no-store']];
+        }
+        $options = json_encode(['siteKey' => $this->config->siteKey, 'url' => $this->config->powWebSocketUrl],
+            JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR);
+        $script = file_get_contents(__DIR__ . '/../resources/pow.js');
+        if ($script === false) throw new \RuntimeException('Missing WebSocket PoW resource');
+        $body = '<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex">'
+            . '<meta name="referrer" content="no-referrer"><title>Browser verification</title></head><body>'
+            . '<p id="sg-status" role="status">Verifying your browser...</p><noscript>JavaScript is required.</noscript>'
+            . '<script>window.__sg_powOptions=' . $options . ';' . $script . '</script></body></html>';
+        return ['block' => true, 'status' => 200, 'contentType' => 'text/html; charset=utf-8', 'body' => $body,
+            'headers' => ['Cache-Control' => 'no-store', 'Referrer-Policy' => 'no-referrer']];
     }
     private function safeChallengePath(string $path): string
     {
@@ -273,17 +243,6 @@ class Core
         }
         return true;
     }
-    private function consumeProof(string $proof): bool
-    {
-        if (isset($this->usedProofs[$proof])) return false;
-        $this->usedProofs[$proof] = time();
-        if (count($this->usedProofs) > 5000) {
-            $now = time();
-            $this->usedProofs = array_filter($this->usedProofs, fn($t) => $now - $t <= (self::POW_TTL_MS / 1000));
-        }
-        return true;
-    }
-
     private function warnIfValidationFailed(bool $force = false): void
     {
         $now = time();

@@ -24,6 +24,9 @@ class GuardInjector
     public function inject(string $html, string $path, string $ua, string $ip, string $host, ?string $acceptLanguage = null, string $renderUrl = ''): string
     {
         $guards = $this->guardCache->get();
+        if (trim($guards['detect'] ?? '') === '') {
+            throw new \RuntimeException('Shugoi detection guard is unavailable');
+        }
         $whitelistConfig = $this->configCache->get($this->config->internalUrl);
         $whitelistConfig['powDifficulty'] = $this->config->powDifficulty;
 
@@ -46,7 +49,7 @@ class GuardInjector
         $this->htmlStore->store($token, $injectedHtml, 120_000, 1, true);
 
         $skeletonGen = $this->skeletonGenerator ?? new SkeletonGenerator($this->tokenSigner);
-        $renderUrl = $renderUrl ?: $baseUrl . '/__shugoi/render';
+        $renderUrl = $renderUrl ?: '/__shugoi/render';
         $skeleton = $skeletonGen->generate($token, $guards, $whitelistConfig, $this->config->restrictedAccess, $locale, $baseUrl, $renderUrl, $this->config->siteKey);
 
         return $skeleton;

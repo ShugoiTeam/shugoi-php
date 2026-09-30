@@ -25,13 +25,21 @@ class SkeletonGenerator
         $fragments[] = 'window.__sg_siteKey=' . json_encode($siteKey, JSON_UNESCAPED_UNICODE);
         $fragments[] = 'window.__sg_baseUrl=' . json_encode($baseUrl, JSON_UNESCAPED_UNICODE);
         $fragments[] = 'window.__sg_config=' . json_encode($flags);
+        $fragments[] = 'window.__sg_token=' . json_encode($token);
+        $fragments[] = 'window.__sg_renderUrl=' . json_encode($renderUrl);
+        $fragments[] = 'window.__sg_transportMessages=' . json_encode([
+            'title' => $msgs['serviceUnavailableTitle'],
+            'body' => $msgs['renderFailedBody'],
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $fragments[] = BrowserTransport::script();
         $fragments[] = 'window.__sg_diagEnabled=' . ($this->isProduction() ? 'false' : 'true');
         $fragments[] = "try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}";
         $powTs = time();
         $powSecret = $this->tokenSigner->secret();
-        $powSalt = $powSecret !== '' ? hash_hmac('sha256', (string)$powTs, $powSecret) : '';
+        $powNonce = bin2hex(random_bytes(8));
+        $powSalt = $powSecret !== '' ? hash_hmac('sha256', $powTs . ':' . $powNonce, $powSecret) : '';
         $powDiff = (int)($config['powDifficulty'] ?? 14);
-        $fragments[] = 'window.__sg_pow=' . json_encode(['ts' => $powTs, 'salt' => $powSalt, 'difficulty' => $powDiff]);
+        $fragments[] = 'window.__sg_pow=' . json_encode(['ts' => $powTs, 'nonce' => $powNonce, 'salt' => $powSalt, 'difficulty' => $powDiff]);
         $nowMs = (int)(microtime(true) * 1000);
         $fragments[] = 'window.__sg_ntp=' . $nowMs;
         $fragments[] = 'window.__sg_serverTime=' . $nowMs;
@@ -105,7 +113,7 @@ class SkeletonGenerator
         $devtools = self::jsStr($msgs['devtoolsBody']);
         $tamperTitle = self::jsStr($msgs['tamperTitle']);
         return 'var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};'
-            . 'function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);'
+            . 'function rd(p,n){if(window.__sg_blocked||window.__sg_renderStarted||window.__sg_renderDone)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);'
             . 'if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' . $devtools . '","' . $tamperTitle . '");return}'
             . 'var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}'
             . 'var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}'
@@ -120,7 +128,7 @@ class SkeletonGenerator
 
     private function cleanupFragment(): string
     {
-        return 'function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}'
+        return 'function _sgCl(){if(window.__sg_wsMux||typeof window.__sg_wlcRequest==="function")return;try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}'
             . 'window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};'
             . 'window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}';
     }

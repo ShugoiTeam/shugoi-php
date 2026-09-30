@@ -7,6 +7,18 @@ use Shugoi\CspBuilder;
 
 class CspBuilderTest extends TestCase
 {
+    public function testWebsocketOriginsAndBlobWorkersAreAllowedWithoutUnsafeEval(): void
+    {
+        $result = (new CspBuilder(new Config([
+            'siteKey' => 'fixture', 'baseUrl' => 'http://127.0.0.1:4196/api/v1',
+            'powWebSocketUrl' => 'ws://127.0.0.1:4197/__sg_challenge/ws',
+        ])))->build();
+        $this->assertStringContainsString('ws://127.0.0.1:4196', $result);
+        $this->assertStringContainsString('ws://127.0.0.1:4197', $result);
+        $this->assertStringContainsString('wss://shugoi.com', $result);
+        $this->assertStringContainsString("worker-src 'self' blob:", $result);
+        $this->assertStringNotContainsString("'unsafe-eval'", $result);
+    }
     public function testDefaultCspContainsExpectedDirectives(): void
     {
         $config = new Config(['siteKey' => 'test_key', 'baseUrl' => 'https://shugoi.com/api/v1']);

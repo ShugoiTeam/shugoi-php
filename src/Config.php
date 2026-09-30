@@ -57,6 +57,9 @@ class Config
     public readonly mixed $blockPage;
     public readonly bool $splitRender;
     public readonly bool $multiProcess;
+    public readonly ?string $renderStorePath;
+    public readonly string $powWebSocketUrl;
+    public readonly ?string $powReceiptStorePath;
     public readonly bool $verifyBots;
     public readonly int $powDifficulty;
     public readonly int $powTtlMs;
@@ -85,6 +88,9 @@ class Config
         $this->blockPage = $options['blockPage'] ?? null;
         $this->splitRender = $options['splitRender'] ?? true;
         $this->multiProcess = $options['multiProcess'] ?? false;
+        $this->renderStorePath = $options['renderStorePath'] ?? null;
+        $this->powWebSocketUrl = $options['powWebSocketUrl'] ?? '/__sg_challenge/ws';
+        $this->powReceiptStorePath = $options['powReceiptStorePath'] ?? null;
         $this->verifyBots = $options['verifyBots'] ?? true;
         $this->powDifficulty = $options['powDifficulty'] ?? 14;
         $this->powTtlMs = $options['powTtlMs'] ?? 60_000;
@@ -95,7 +101,7 @@ class Config
     {
         $secret = $this->signingSecret ?? $this->secret;
 
-        if ($secret === null) {
+        if ($secret === null || $secret === '') {
             throw new \RuntimeException('No signing secret configured');
         }
 
