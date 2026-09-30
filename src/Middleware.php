@@ -182,7 +182,7 @@ class Middleware implements PsrMiddlewareInterface
             $headers['Referrer-Policy'] = 'strict-origin-when-cross-origin';
             $headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, no-transform';
             $headers['Pragma'] = 'no-cache';
-            $headers['Set-Cookie'] = $this->pow()->sgAuthorizedCookie();
+            $headers['Set-Cookie'] = $this->pow()->sgAuthorizedCookie($request->getUri()->getScheme() === 'https');
         }
         return new Response(200, $headers, json_encode($data));
     }

@@ -15,7 +15,11 @@ class ShugoiMiddleware
     public function handle(Request $request, Closure $next): mixed
     {
         $psrFactory = new Psr17Factory();
-        $uri = $psrFactory->createUri($request->fullUrl());
+        // fullUrl() normalizes and sorts the query, discarding repeated keys.
+        // Keep the original query bytes for the receipt-to-page redirect.
+        $uri = $psrFactory->createUri($request->getSchemeAndHttpHost())
+            ->withPath($request->getBaseUrl() . $request->getPathInfo())
+            ->withQuery((string)$request->server->get('QUERY_STRING', ''));
         $headers = $request->headers->all();
         $body = $psrFactory->createStream($request->getContent());
         $serverParams = $request->server->all();

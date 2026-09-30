@@ -100,6 +100,28 @@ class PowTest extends TestCase
         $this->assertStringContainsString('Max-Age=120', $cookie);
     }
 
+    public function test_https_authorized_cookie_is_secure_without_runtime_environment(): void
+    {
+        $environment = [];
+        foreach (['APP_ENV', 'NODE_ENV'] as $name) {
+            $environment[$name] = [getenv($name), array_key_exists($name, $_SERVER), $_SERVER[$name] ?? null];
+            putenv($name);
+            unset($_SERVER[$name]);
+        }
+        try {
+            $this->assertStringContainsString('; Secure', $this->makePow()->sgAuthorizedCookie(true));
+            $this->assertStringNotContainsString('; Secure', $this->makePow()->sgAuthorizedCookie());
+            putenv('APP_ENV=production');
+            $this->assertStringContainsString('; Secure', $this->makePow()->sgAuthorizedCookie());
+        } finally {
+            foreach ($environment as $name => [$value, $exists, $serverValue]) {
+                putenv($value === false ? $name : $name . '=' . $value);
+                if ($exists) $_SERVER[$name] = $serverValue;
+                else unset($_SERVER[$name]);
+            }
+        }
+    }
+
     public function test_challenge_is_server_signed_and_bounded(): void
     {
         $pow = $this->makePow(4);

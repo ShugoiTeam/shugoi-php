@@ -43,6 +43,48 @@ php vendor/bin/shugoi-websocket.php
 When working directly in this package's checkout, use
 `php bin/shugoi-websocket.php` instead.
 
+## Laravel deployment
+
+The `shugoi/shugoi-php` package includes Laravel's auto-discovered service provider,
+HTTP middleware and render controller. Register the middleware globally with
+`$middleware->append(\Shugoi\Laravel\ShugoiMiddleware::class)` in
+`bootstrap/app.php`, as shown in the README. This runs protection after Laravel's
+global proxy handling and outside the route-level cookie/session middleware.
+Keep it global rather than adding it a second time to the `web` group: the PoW
+admission and render cookies must retain their signed values across requests.
+
+Publish the configuration when installing into an existing application:
+
+```sh
+php artisan vendor:publish --tag=shugoi-config
+```
+
+If `config/shugoi.php` was already published, merge the new options into that
+file. Retain the default `headlessPatterns`, enable `multiProcess`, and configure
+`powWebSocketUrl` and `powReceiptStorePath`; old published configuration can
+override package defaults. For example, use a private path under the application's
+writable storage directory:
+
+```ini
+SHUGOI_POW_WEBSOCKET_URL=/__sg_challenge/ws
+SHUGOI_POW_RECEIPT_STORE_PATH=/var/www/example/storage/framework/cache/shugoi-pow
+```
+
+After changing application environment/configuration, rebuild its configuration
+cache with `php artisan config:cache` and reload persistent application workers.
+Restart the gateway service separately when its environment changes. The gateway
+is a standalone CLI process: `config:cache` and Laravel's `.env` loader do not
+configure it. Its service environment must contain the same `SHUGOI_SITE_KEY`
+and effective signing secret as the Laravel app (`SHUGOI_SIGNING_SECRET` when
+set, otherwise `SHUGOI_SECRET`). Never pass secrets as command-line arguments.
+
+Both `storage/framework/cache/shugoi-render/<site-key-hash>` and the receipt
+directory must remain private and shared between the Laravel web workers. Keep
+`/__shugoi/render` in the normal Laravel HTTP entry point; only
+`/__sg_challenge/ws` is forwarded to the gateway. Do not put either protection
+route on the Shugoi allowlist. API exclusions keep their own application
+authentication and authorization.
+
 ## Nginx
 
 Add this exact location to the TLS virtual host serving the PHP application:

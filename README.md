@@ -62,6 +62,10 @@ php artisan shugoi:setup
 
 Configure and start the [PHP WebSocket gateway](docs/websocket-gateway.md), including the Nginx upgrade route and matching environment. The protected browser flow requires this service; PHP-FPM alone does not accept WebSocket upgrades.
 
+Laravel uses this same package and PoW gateway; no separate Laravel SDK is needed.
+Follow the [Laravel deployment notes](docs/websocket-gateway.md#laravel-deployment)
+for middleware order, private storage, cached configuration and gateway secrets.
+
 ## Demo
 
 A complete demo script is available in `demo/setup.sh`:

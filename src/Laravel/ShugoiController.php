@@ -37,7 +37,7 @@ class ShugoiController
             $headers['Referrer-Policy'] = 'strict-origin-when-cross-origin';
             $headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, no-transform';
             $headers['Pragma'] = 'no-cache';
-            $headers['Set-Cookie'] = $this->pow->sgAuthorizedCookie();
+            $headers['Set-Cookie'] = $this->pow->sgAuthorizedCookie($request->isSecure());
         }
         return response()->json($data, 200, $headers);
     }

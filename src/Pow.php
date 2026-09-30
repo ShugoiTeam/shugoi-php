@@ -113,11 +113,11 @@ class Pow
         return hash_equals(hash_hmac('sha256', 'sg_authorized:' . $tsStr, $this->secret()), $sig);
     }
 
-    public function sgAuthorizedCookie(): string
+    public function sgAuthorizedCookie(bool $secure = false): string
     {
-        $secure = $this->isProduction() ? '; Secure' : '';
+        $secureAttribute = $secure || $this->isProduction() ? '; Secure' : '';
         return '__sg_authorized=' . $this->sgAuthorizedValue()
-            . '; Path=/; HttpOnly; SameSite=Strict; Max-Age=120' . $secure;
+            . '; Path=/; HttpOnly; SameSite=Strict; Max-Age=120' . $secureAttribute;
     }
 
     private function nonce(): string
