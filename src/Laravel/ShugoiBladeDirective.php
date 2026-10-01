@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace Shugoi\Laravel;
 
 use Illuminate\Support\Facades\Blade;

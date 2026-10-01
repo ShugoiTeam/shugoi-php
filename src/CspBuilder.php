@@ -1,12 +1,17 @@
 <?php
+declare(strict_types=1);
+
 namespace Shugoi;
 
 class CspBuilder
 {
     private const DEFAULT_DIRECTIVES = [
         'default-src' => ["'self'"],
-        'script-src' => ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        // Pas d''unsafe-eval' : la couche "invisible eval" (U+E0000) est
+        // temporairement retirée (crash WebKit/Safari, voir SkeletonGenerator).
+        'script-src' => ["'self'", "'unsafe-inline'"],
         'connect-src' => ["'self'"],
+        'worker-src' => ["'self'", 'blob:'],
         'style-src' => ["'self'", "'unsafe-inline'"],
         'font-src' => ["'self'", 'data:'],
         'img-src' => ["'self'", 'data:', 'blob:'],
@@ -33,11 +38,23 @@ class CspBuilder
                 $directives[$dir][] = $shugoiOrigin;
             }
         }
-        if (!$this->config->splitRender) {
-            $directives['script-src'] = array_values(
-                array_filter($directives['script-src'], fn($v) => $v !== "'unsafe-eval'")
-            );
+        foreach (array_unique(array_filter([$apiOrigin, $shugoiOrigin])) as $origin) {
+            if (str_starts_with($origin, 'https://')) {
+                $directives['connect-src'][] = 'wss://' . substr($origin, 8);
+            } elseif (str_starts_with($origin, 'http://')) {
+                $directives['connect-src'][] = 'ws://' . substr($origin, 7);
+            }
         }
+        $powEndpoint = parse_url($this->config->powWebSocketUrl);
+        if (is_array($powEndpoint) && isset($powEndpoint['scheme'], $powEndpoint['host'])
+            && in_array($powEndpoint['scheme'], ['http', 'https', 'ws', 'wss'], true)) {
+            $scheme = in_array($powEndpoint['scheme'], ['https', 'wss'], true) ? 'wss' : 'ws';
+            $directives['connect-src'][] = $scheme . '://' . $powEndpoint['host']
+                . (isset($powEndpoint['port']) ? ':' . $powEndpoint['port'] : '');
+        }
+        // La couche invisible-eval étant temporairement retirée (crash WebKit,
+        // voir SkeletonGenerator), plus besoin d''unsafe-eval' — le CSP reste
+        // strict même avec splitRender activé.
         if ($this->config->extraDirectives) {
             foreach ($this->config->extraDirectives as $name => $values) {
                 $directives[$name] ??= [];
@@ -58,9 +75,6 @@ class CspBuilder
                 $existingDirectives[$name] = array_values(array_unique([...$existingDirectives[$name], ...$values]));
             }
         }
-        // Spec CSP : le mot-clé 'none' doit être SEUL dans une directive — sinon il est
-        // ignoré par le navigateur. Lors d'un merge (ex. un site définit frame-ancestors
-        // 'none' et le module ajoute 'self'), on garde uniquement 'none' (le plus restrictif).
         foreach ($existingDirectives as $name => $values) {
             if (in_array("'none'", $values, true) && count($values) > 1) {
                 $existingDirectives[$name] = ["'none'"];

@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace Shugoi\Laravel\Commands;
 
 use Illuminate\Console\Command;
@@ -42,7 +43,8 @@ class ShugoiSetupCommand extends Command
             $this->info('Guard-detect: ' . strlen($detect) . ' bytes');
             $this->info('Guard: ' . strlen($guard) . ' bytes');
         } catch (\Throwable $e) {
-            $this->warn('Could not fetch guards: ' . $e->getMessage());
+            $this->error('Could not fetch guard scripts (error ' . $e->getCode() . ').');
+            return Command::FAILURE;
         }
 
         $this->newLine();

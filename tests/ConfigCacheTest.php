@@ -62,7 +62,6 @@ class ConfigCacheTest extends TestCase
         $this->assertEquals($whitelistData, $result1);
 
         $ref = new \ReflectionProperty($cache, 'store');
-        $ref->setAccessible(true);
         $store = $ref->getValue($cache);
         $store['default']['fetchedAt'] = microtime(true) - 100;
         $ref->setValue($cache, $store);

@@ -1,0 +1,11 @@
+{
+  "name": "shugoi/parity-install-test",
+  "description": "Clean installation fixture for the PHP SDK",
+  "license": "MIT",
+  "require": {
+    "php": ">=8.2",
+    "illuminate/support": "^11.0"
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true
+}

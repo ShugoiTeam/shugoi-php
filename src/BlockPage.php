@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 namespace Shugoi;
 
 class BlockPage
@@ -15,9 +17,6 @@ class BlockPage
         $htmlTitle = htmlspecialchars($title, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $htmlBadge = htmlspecialchars($badge, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $htmlDesc = htmlspecialchars($message, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-
-        // Compte à rebours : on enveloppe les secondes dans le message, sinon on ajoute
-        // le span directement (le module Node met à jour #cd via un script dédié).
         if ($remainingSeconds !== null) {
             $replaced = preg_replace('/(\d+)s/', '<span id="sg-countdown">$1s</span>', $htmlDesc, 1, $n);
             if ($n > 0) {
@@ -44,7 +43,7 @@ class BlockPage
             . $htmlTitle . ' · Shugoi</title><style>'
             . $fontFace . $cssBody . $cssCard . $cssLogo . $cssBrand . $cssBdg . $cssH2 . $cssDesc
             . '</style></head><body><div id=c>'
-            . '<img src=https://shugoi.com/favicon.png alt class=l><img src=https://shugoi.com/brand.png alt class=b>'
+            . '<img src=https://shugoi.com/favicon-block.png alt class=l><img src=https://shugoi.com/brand-block.png alt=Shugoi class=b>'
             . '<div class=bdg>' . $htmlBadge . '</div>'
             . '<h2>' . $htmlTitle . '</h2>'
             . '<p class=desc>' . $htmlDesc . '</p>'
@@ -55,7 +54,7 @@ class BlockPage
 
     private static function countdownScript(int $totalSeconds): string
     {
-        return '<script>var s=' . $totalSeconds . ';var i=setInterval(function(){s--;var e=document.getElementById("sg-countdown");if(e){if(s<=0){e.innerHTML="0s";clearInterval(i);setTimeout(function(){location.reload()},500)}else{e.innerHTML=s+"s"}}},1000)</script>';
+        return '<script>var s=' . $totalSeconds . ';var i=setInterval(function(){s--;var e=document.getElementById("sg-countdown");if(e){if(s<=0){e.innerHTML="0s";clearInterval(i)}else{e.innerHTML=s+"s"}}},1000)</script>';
     }
 
     public static function blocked(array $ctx): string
@@ -76,8 +75,6 @@ class BlockPage
         $locale = $ctx['locale'] ?? 'en';
         return self::shield($locale, Locales::get($locale, 'blockedTitle'), Locales::get($locale, 'devtoolsBody'), Locales::get($locale, 'blockedBadge'), $ctx['host'] ?? null);
     }
-
-    /** Format du temps restant — parité exacte avec core.ts (timeStr). */
     private static function formatRemaining(int $seconds): string
     {
         $mins = intdiv($seconds, 60);

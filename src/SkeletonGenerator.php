@@ -1,10 +1,6 @@
 <?php
+declare(strict_types=1);
 namespace Shugoi;
-
-/**
- * Génère le skeleton HTML (bootcode unicode) injecté dans la page — parité avec
- * generateSkeleton (render.ts du module Node). Retourne uniquement <script>…</script>.
- */
 class SkeletonGenerator
 {
     public function __construct(
@@ -29,17 +25,21 @@ class SkeletonGenerator
         $fragments[] = 'window.__sg_siteKey=' . json_encode($siteKey, JSON_UNESCAPED_UNICODE);
         $fragments[] = 'window.__sg_baseUrl=' . json_encode($baseUrl, JSON_UNESCAPED_UNICODE);
         $fragments[] = 'window.__sg_config=' . json_encode($flags);
-        // Mode debug (audit #8) : piloté UNIQUEMENT par le serveur. En production ce flag
-        // est toujours false → le guard n'active jamais ses traces via ?sg_probe_debug=1.
+        $fragments[] = 'window.__sg_token=' . json_encode($token);
+        $fragments[] = 'window.__sg_renderUrl=' . json_encode($renderUrl);
+        $fragments[] = 'window.__sg_transportMessages=' . json_encode([
+            'title' => $msgs['serviceUnavailableTitle'],
+            'body' => $msgs['renderFailedBody'],
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $fragments[] = BrowserTransport::script();
         $fragments[] = 'window.__sg_diagEnabled=' . ($this->isProduction() ? 'false' : 'true');
         $fragments[] = "try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}";
-        // Challenge PoW anti-curl : le guard le résout en JS et l'envoie au wlc.
-        // salt = HMAC(secret, ts) ; difficulté = config (injectée par GuardInjector).
         $powTs = time();
         $powSecret = $this->tokenSigner->secret();
-        $powSalt = $powSecret !== '' ? hash_hmac('sha256', (string)$powTs, $powSecret) : '';
+        $powNonce = bin2hex(random_bytes(8));
+        $powSalt = $powSecret !== '' ? hash_hmac('sha256', $powTs . ':' . $powNonce, $powSecret) : '';
         $powDiff = (int)($config['powDifficulty'] ?? 14);
-        $fragments[] = 'window.__sg_pow=' . json_encode(['ts' => $powTs, 'salt' => $powSalt, 'difficulty' => $powDiff]);
+        $fragments[] = 'window.__sg_pow=' . json_encode(['ts' => $powTs, 'nonce' => $powNonce, 'salt' => $powSalt, 'difficulty' => $powDiff]);
         $nowMs = (int)(microtime(true) * 1000);
         $fragments[] = 'window.__sg_ntp=' . $nowMs;
         $fragments[] = 'window.__sg_serverTime=' . $nowMs;
@@ -47,12 +47,11 @@ class SkeletonGenerator
         if (!$restrictedAccess) {
             $fragments[] = 'window.__sg_disableRestrictedAccess=true';
         }
-        // Fusion des guards (audit) : seul guard-detect est injecté (parité module Node).
         if (!empty($guards['detect'])) {
-            $fragments[] = 'try{' . $guards['detect'] . '}catch(e){window.__sg_blocked=true}';
+            $fragments[] = '__shugoi_remote_guard__()';
         }
 
-        $fragments[] = $this->showBlockFragment($msgs);
+        $fragments[] = $this->showBlockFragment($msgs, (string)($config['supportEmail'] ?? 'support@shugoi.com'));
         $fragments[] = 'var t=' . json_encode($token);
         $fragments[] = 'window.__sg_token=' . json_encode($token);
         $fragments[] = 'var k=' . json_encode($siteKey);
@@ -63,25 +62,39 @@ class SkeletonGenerator
         $fragments[] = $this->cleanupFragment();
 
         $combined = implode(';', $fragments);
-        // Échappe `</script>` / `</style>` AVANT l'encodage unicode (sinon le HTML parser
-        // coupe le <script> au premier `</script>` du guard-detect obfusqué).
         $combined = preg_replace('#</(script|style)#i', '<\\\\/$1', $combined);
 
         if ($this->obfuscator) {
             $combined = $this->obfuscator->obfuscate($combined, $siteKey);
+            // ⚠️ Couche "invisible eval" (U+E0000, Obfuscator::invisibleEval)
+            // TEMPORAIREMENT RETIRÉE : elle crash WebKit/Safari (bootcode affiché
+            // en <pre> → page morte), confirmé 2× côté SDK Node. Le code est
+            // conservé pour réactivation future — voir AGENTS.md.
+            // $combined = $this->obfuscator->invisibleEval($combined, $siteKey . '_e0');
         }
 
-        $encoded = $this->unicodeEncode($combined);
-        $bootCode = "eval([...'" . $encoded . "'].map(function(x){return String.fromCodePoint(x.codePointAt(0)-917504)}).join(''))";
+        // The API guard already contains its own build/rotation. Rewriting its
+        // function bodies breaks workers created from Function#toString: they
+        // cannot access this document's string decoder in their separate realm.
+        // Escape document tags too: outer HTML asset injectors must not rewrite
+        // an error-page string inside the JavaScript payload.
+        if (!empty($guards['detect'])) {
+            $guard = preg_replace('~</([a-z][a-z0-9-]*)~i', '<\\\\/$1', $guards['detect']);
+            $combined = str_replace('__shugoi_remote_guard__()', 'try{' . $guard . '}catch(e){window.__sg_blocked=true}', $combined);
+        }
 
-        return '<script>' . $bootCode . '</script>';
+        return '<script>' . $combined . '</script>';
     }
 
-    private function showBlockFragment(array $msgs): string
+    private function showBlockFragment(array $msgs, string $supportEmail): string
     {
         $fbBadge = self::jsStr($msgs['blockedBadge']);
         $fbTitle = self::jsStr($msgs['blockedTitle']);
-        return 'window.__sg_showBlock=function(msg,title,badge){var h='
+        $restrictedTitle = self::jsStr($msgs['restrictedTitle']);
+        $restrictedBody = self::jsStr(sprintf($msgs['restrictedBody'], '<strong style="color:#c2546f">' . ($supportEmail !== '' ? $supportEmail : 'support@shugoi.com') . '</strong>'));
+        return 'window.__sg_showBlock=function(msg,title,badge){'
+            . 'if((msg==="Accès restreint"||msg==="Restricted Access")&&/n\\\'est pas autorisé|not authorized/i.test(String(title||""))){var _sgMid=(window.__sg_detectMid||window.__sg_mid||"");msg="' . $restrictedBody . '"+( _sgMid?" <code style=\\"font-size:.7rem\\">"+_sgMid+"</code>":"");title="' . $restrictedTitle . '"}'
+            . 'var h='
             . '"<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><style>'
             . "@font-face{font-family:\\x27Alex Brush\\x27;src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\\x27woff2\\x27);font-display:swap}"
             . '*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}'
@@ -93,6 +106,12 @@ class SkeletonGenerator
             . "h2{font-family:\\x27Alex Brush\\x27,Georgia,\\x27Times New Roman\\x27,serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}"
             . '#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}'
             . '#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}'
+            . '@media (prefers-color-scheme:dark){html,body{background:#16101c}'
+            . '#c{background:#241a30;border-color:rgba(241,232,245,.14);box-shadow:0 10px 30px rgba(0,0,0,.4)}'
+            . '#c .bdg{background:rgba(233,137,159,.16);border-color:rgba(233,137,159,.5);color:#e9899f}'
+            . '#c h2{color:#e9899f}'
+            . '#c p.desc{color:#a795b4}'
+            . '#c p.ft{color:#e9899f}}'
             . '</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l>'
             . '<img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||"' . $fbBadge . '")+"</div>'
             . '<h2>"+(title||"' . $fbTitle . '")+"</h2><p class=desc>"+(msg||"")+"</p>'
@@ -104,7 +123,7 @@ class SkeletonGenerator
         $devtools = self::jsStr($msgs['devtoolsBody']);
         $tamperTitle = self::jsStr($msgs['tamperTitle']);
         return 'var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};'
-            . 'function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);'
+            . 'function rd(p,n){if(window.__sg_blocked||window.__sg_renderStarted||window.__sg_renderDone)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);'
             . 'if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' . $devtools . '","' . $tamperTitle . '");return}'
             . 'var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}'
             . 'var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}'
@@ -114,32 +133,18 @@ class SkeletonGenerator
             . 'if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}'
             . 'if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' . $devtools . '","' . $tamperTitle . '")}'
             . 'else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}})'
-            . '.catch(function(){setTimeout(function(){rd(p,n+1)},300)})}';
+            . '.catch(function(){window.__sg_showBlock&&window.__sg_showBlock("' . self::jsStr($msgs['renderFailedBody']) . '","' . self::jsStr($msgs['serviceUnavailableTitle']) . '")})}';
     }
 
     private function cleanupFragment(): string
     {
-        return 'function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}'
+        return 'function _sgCl(){if(window.__sg_wsMux||typeof window.__sg_wlcRequest==="function")return;try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}'
             . 'window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};'
             . 'window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}';
     }
-
-    /** jsStr : JSON sans guillemets externes + échappe `<` (parité render.ts). */
     private static function jsStr(string $s): string
     {
         return str_replace('<', '\\x3c', substr(json_encode($s, JSON_UNESCAPED_UNICODE), 1, -1));
-    }
-
-    /** Encodage par code unit UTF-16 (parité charCodeAt du module Node). */
-    private function unicodeEncode(string $code): string
-    {
-        $utf16 = mb_convert_encoding($code, 'UTF-16BE', 'UTF-8');
-        $units = unpack('n*', $utf16);
-        $result = '';
-        foreach ($units as $unit) {
-            $result .= mb_chr(917504 + $unit, 'UTF-8');
-        }
-        return $result;
     }
 
     private function isProduction(): bool

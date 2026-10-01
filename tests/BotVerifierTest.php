@@ -26,7 +26,6 @@ class BotVerifierTest extends TestCase
 
         $ref = new \ReflectionClass(BotVerifier::class);
         $cacheProp = $ref->getProperty('cache');
-        $cacheProp->setAccessible(true);
         $cacheKey = md5($ua . ':' . $ip);
         $cacheProp->setValue(null, [$cacheKey => ['result' => true, 'time' => time()]]);
 
@@ -68,7 +67,6 @@ class BotVerifierTest extends TestCase
 
         $ref = new \ReflectionClass(BotVerifier::class);
         $cacheProp = $ref->getProperty('cache');
-        $cacheProp->setAccessible(true);
         $cacheKey = md5($ua . ':' . $ip);
         $cacheProp->setValue(null, [$cacheKey => ['result' => true, 'time' => time() - 7200]]);
 

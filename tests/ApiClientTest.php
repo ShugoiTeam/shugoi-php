@@ -61,6 +61,34 @@ class ApiClientTest extends TestCase
         $this->assertEquals('console.log("guard");', $guard);
     }
 
+    public function test_all_signed_endpoints_use_fresh_millisecond_callbacks(): void
+    {
+        $mock = new MockHandler([
+            new Response(200, [], 'detect'),
+            new Response(200, [], 'guard'),
+            new Response(200, [], '{}'),
+        ]);
+        $history = [];
+        $handler = HandlerStack::create($mock);
+        $handler->push(\GuzzleHttp\Middleware::history($history));
+        $api = new ApiClient($this->config, new GuzzleClient(['handler' => $handler]));
+        $before = (int)floor(microtime(true) * 1000);
+        $api->fetchGuardDetect();
+        $api->fetchGuard();
+        $api->fetchWhitelist();
+        $after = (int)floor(microtime(true) * 1000);
+
+        $this->assertCount(3, $history);
+        foreach ($history as $exchange) {
+            parse_str($exchange['request']->getUri()->getQuery(), $query);
+            // Match the deployed API's freshness and HMAC contract, not just its signature.
+            $this->assertMatchesRegularExpression('/^[1-9][0-9]{0,15}$/D', $query['cb']);
+            $this->assertGreaterThanOrEqual($before, (int)$query['cb']);
+            $this->assertLessThanOrEqual($after, (int)$query['cb']);
+            $this->assertSame(hash_hmac('sha256', $query['cb'], 'test_secret'), $query['sig']);
+        }
+    }
+
     public function test_check_rate_limit(): void
     {
         $mock = new MockHandler([

@@ -6,6 +6,26 @@ use Shugoi\BlockPage;
 
 class BlockPageTest extends TestCase
 {
+    public function testRateLimitCountdownDoesNotReloadAutomatically(): void
+    {
+        $html = \Shugoi\BlockPage::rateLimit([
+            'locale' => 'fr',
+            'remainingSeconds' => 60,
+            'host' => 'example.test',
+        ]);
+
+        $this->assertStringContainsString('clearInterval(i)', $html);
+        $this->assertStringNotContainsString('location.reload()', $html);
+    }
+
+    public function testBlockingCardUsesBlockingBrandAssets(): void
+    {
+        $html = \Shugoi\BlockPage::blocked(['locale' => 'fr', 'host' => 'example.test']);
+
+        $this->assertStringContainsString('favicon-block.png', $html);
+        $this->assertStringContainsString('brand-block.png', $html);
+        $this->assertStringNotContainsString('https://shugoi.com/favicon.png', $html);
+    }
     public function testShieldContainsDoctype(): void
     {
         $html = BlockPage::shield('en', 'Test Title', 'Test Message', 'BADGE');
@@ -76,10 +96,10 @@ class BlockPageTest extends TestCase
         $this->assertStringContainsString('alex-brush.woff2', $html);
     }
 
-    public function testShieldContainsFavicon(): void
+    public function testShieldContainsBlockingFavicon(): void
     {
         $html = BlockPage::shield('en', 'Title', 'Msg', 'BADGE');
-        $this->assertStringContainsString('favicon.png', $html);
+        $this->assertStringContainsString('favicon-block.png', $html);
     }
 
     public function testShieldContainsShugoiDotCom(): void

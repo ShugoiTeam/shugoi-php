@@ -28,6 +28,7 @@ class ConfigTest extends TestCase
         $this->assertNull($config->blockPage);
         $this->assertTrue($config->splitRender);
         $this->assertFalse($config->multiProcess);
+        $this->assertNull($config->renderStorePath);
         $this->assertTrue($config->verifyBots);
     }
 
@@ -84,6 +85,12 @@ class ConfigTest extends TestCase
         $config = new Config(['siteKey' => 'test_key']);
 
         $this->assertFalse($config->multiProcess);
+    }
+
+    public function testRenderStorePathCanBeConfigured(): void
+    {
+        $config = new Config(['siteKey' => 'test', 'renderStorePath' => '/var/cache/application/shugoi']);
+        $this->assertSame('/var/cache/application/shugoi', $config->renderStorePath);
     }
 
     public function testAllowlistCanBeOverridden()

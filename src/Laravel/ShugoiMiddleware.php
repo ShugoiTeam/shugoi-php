@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace Shugoi\Laravel;
 
 use Illuminate\Http\Request;
@@ -13,13 +14,12 @@ class ShugoiMiddleware
 
     public function handle(Request $request, Closure $next): mixed
     {
-        if (str_starts_with($request->path(), '__shugoi/')) {
-            return $next($request);
-        }
-
-        // Convert Laravel request to PSR-7
         $psrFactory = new Psr17Factory();
-        $uri = $psrFactory->createUri($request->fullUrl());
+        // fullUrl() normalizes and sorts the query, discarding repeated keys.
+        // Keep the original query bytes for the receipt-to-page redirect.
+        $uri = $psrFactory->createUri($request->getSchemeAndHttpHost())
+            ->withPath($request->getBaseUrl() . $request->getPathInfo())
+            ->withQuery((string)$request->server->get('QUERY_STRING', ''));
         $headers = $request->headers->all();
         $body = $psrFactory->createStream($request->getContent());
         $serverParams = $request->server->all();
@@ -31,35 +31,48 @@ class ShugoiMiddleware
             '1.1',
             $serverParams
         );
+        $psrRequest = $psrRequest
+            ->withQueryParams($request->query->all())
+            ->withCookieParams($request->cookies->all())
+            ->withParsedBody($request->request->all())
+            ->withAttribute('shugoi.basePath', $request->getBaseUrl())
+            ->withAttribute('shugoi.clientIp', $request->getClientIp());
 
-        $handler = new class($next) implements \Psr\Http\Server\RequestHandlerInterface {
-            public function __construct(private $next) {}
+        $handler = new class($next, $request) implements \Psr\Http\Server\RequestHandlerInterface {
+            public ?\Symfony\Component\HttpFoundation\Response $response = null;
+
+            public function __construct(private $next, private Request $laravelRequest) {}
             public function handle(\Psr\Http\Message\ServerRequestInterface $request): \Psr\Http\Message\ResponseInterface
             {
-                // Rebuild Laravel request
-                $method = $request->getMethod();
-                $uri = (string)$request->getUri();
-                $headers = $request->getHeaders();
-                $body = (string)$request->getBody();
-                $laravelRequest = Request::create($uri, $method, [], [], [], [], $body);
-                foreach ($headers as $name => $values) {
-                    $laravelRequest->headers->set($name, $values);
-                }
-                $response = ($this->next)($laravelRequest);
-                // Convert Laravel response to PSR-7
+                // Keep route bindings, session, authentication and uploaded files on
+                // the actual Laravel request instead of constructing a new one.
+                $response = $this->response = ($this->next)($this->laravelRequest);
                 $psrFactory = new Psr17Factory();
+                $content = $response->getContent();
                 $psrResponse = new \Nyholm\Psr7\Response(
                     $response->getStatusCode(),
                     $response->headers->all(),
-                    $psrFactory->createStream($response->getContent())
+                    $psrFactory->createStream($content === false ? '' : $content)
                 );
+                if ($response instanceof \Symfony\Component\HttpFoundation\StreamedResponse) {
+                    $psrResponse = $psrResponse->withHeader('X-Shugoi-Unbuffered', '1');
+                }
                 return $psrResponse;
             }
         };
 
         $psrResponse = $this->middleware->process($psrRequest, $handler);
-
-        // Convert PSR-7 response back to Laravel response
+        if ($handler->response !== null && !($handler->response instanceof \Symfony\Component\HttpFoundation\StreamedResponse) && !($handler->response instanceof \Symfony\Component\HttpFoundation\BinaryFileResponse)) {
+            $response = $handler->response;
+            $response->setContent((string)$psrResponse->getBody());
+            $response->setStatusCode($psrResponse->getStatusCode());
+            $response->headers->replace($psrResponse->getHeaders());
+            return $response;
+        }
+        if ($handler->response !== null && !$request->isMethod('HEAD') && (string)$psrResponse->getBody() === '' && $psrResponse->getStatusCode() === $handler->response->getStatusCode()) {
+            $handler->response->headers->replace($psrResponse->getHeaders());
+            return $handler->response;
+        }
         $laravelResponse = response(
             (string)$psrResponse->getBody(),
             $psrResponse->getStatusCode(),

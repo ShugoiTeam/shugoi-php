@@ -7,6 +7,18 @@ use Shugoi\CspBuilder;
 
 class CspBuilderTest extends TestCase
 {
+    public function testWebsocketOriginsAndBlobWorkersAreAllowedWithoutUnsafeEval(): void
+    {
+        $result = (new CspBuilder(new Config([
+            'siteKey' => 'fixture', 'baseUrl' => 'http://127.0.0.1:4196/api/v1',
+            'powWebSocketUrl' => 'ws://127.0.0.1:4197/__sg_challenge/ws',
+        ])))->build();
+        $this->assertStringContainsString('ws://127.0.0.1:4196', $result);
+        $this->assertStringContainsString('ws://127.0.0.1:4197', $result);
+        $this->assertStringContainsString('wss://shugoi.com', $result);
+        $this->assertStringContainsString("worker-src 'self' blob:", $result);
+        $this->assertStringNotContainsString("'unsafe-eval'", $result);
+    }
     public function testDefaultCspContainsExpectedDirectives(): void
     {
         $config = new Config(['siteKey' => 'test_key', 'baseUrl' => 'https://shugoi.com/api/v1']);
@@ -14,7 +26,9 @@ class CspBuilderTest extends TestCase
         $result = $csp->build();
 
         $this->assertStringContainsString("default-src 'self'", $result);
-        $this->assertStringContainsString("script-src 'self' 'unsafe-inline' 'unsafe-eval'", $result);
+        // invisible-eval retiré (crash WebKit) → plus d''unsafe-eval'
+        $this->assertStringContainsString("script-src 'self' 'unsafe-inline'", $result);
+        $this->assertStringNotContainsString("'unsafe-eval'", $result);
         $this->assertStringContainsString("connect-src 'self'", $result);
         $this->assertStringContainsString("style-src 'self' 'unsafe-inline'", $result);
         $this->assertStringContainsString("font-src 'self' data:", $result);
@@ -31,6 +45,7 @@ class CspBuilderTest extends TestCase
         $csp = new CspBuilder($config);
         $result = $csp->build();
 
+        // invisible-eval retiré → CSP strict sans 'unsafe-eval' dans tous les cas
         $this->assertStringNotContainsString("'unsafe-eval'", $result);
         $this->assertStringContainsString("script-src 'self' 'unsafe-inline'", $result);
     }
@@ -54,7 +69,7 @@ class CspBuilderTest extends TestCase
         $csp = new CspBuilder($config);
         $result = $csp->build();
 
-        $this->assertStringContainsString("script-src 'self' 'unsafe-inline' 'unsafe-eval' https://api.example.com https://shugoi.com", $result);
+        $this->assertStringContainsString("script-src 'self' 'unsafe-inline' https://api.example.com https://shugoi.com", $result);
         $this->assertStringContainsString("connect-src 'self' https://api.example.com https://shugoi.com", $result);
         $this->assertStringContainsString("style-src 'self' 'unsafe-inline' https://api.example.com https://shugoi.com", $result);
         $this->assertStringContainsString("font-src 'self' data: https://api.example.com https://shugoi.com", $result);
@@ -96,7 +111,8 @@ class CspBuilderTest extends TestCase
         $csp = new CspBuilder($config);
         $result = $csp->build();
 
-        $this->assertStringContainsString("script-src 'self' 'unsafe-inline' 'unsafe-eval' https://shugoi.com", $result);
+        $this->assertStringContainsString("script-src 'self' 'unsafe-inline' https://shugoi.com", $result);
+        $this->assertStringNotContainsString("'unsafe-eval'", $result);
     }
 
     public function testMergeDeduplicatesValues(): void
