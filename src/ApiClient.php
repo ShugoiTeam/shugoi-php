@@ -21,7 +21,8 @@ class ApiClient
 
     public function fetchWhitelist(?string $baseUrl = null): array
     {
-        $cb = bin2hex(random_bytes(4));
+        // The API accepts a signed Unix timestamp in milliseconds (60-second TTL).
+        $cb = (string)(int)floor(microtime(true) * 1000);
         try {
             $sig = hash_hmac('sha256', $cb, $this->config->getSigningSecret());
         } catch (\RuntimeException) {
@@ -49,7 +50,8 @@ class ApiClient
     }
     private function guardCb(): string
     {
-        $cb = bin2hex(random_bytes(4));
+        // The API accepts a signed Unix timestamp in milliseconds (60-second TTL).
+        $cb = (string)(int)floor(microtime(true) * 1000);
         try {
             $sig = hash_hmac('sha256', $cb, $this->config->getSigningSecret());
         } catch (\RuntimeException) {
