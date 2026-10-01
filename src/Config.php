@@ -60,6 +60,7 @@ class Config
     public readonly ?string $renderStorePath;
     public readonly string $powWebSocketUrl;
     public readonly ?string $powReceiptStorePath;
+    public readonly bool $failOpenOnUnavailable;
     public readonly bool $verifyBots;
     public readonly int $powDifficulty;
     public readonly int $powTtlMs;
@@ -91,6 +92,7 @@ class Config
         $this->renderStorePath = $options['renderStorePath'] ?? null;
         $this->powWebSocketUrl = $options['powWebSocketUrl'] ?? '/__sg_challenge/ws';
         $this->powReceiptStorePath = $options['powReceiptStorePath'] ?? null;
+        $this->failOpenOnUnavailable = $options['failOpenOnUnavailable'] ?? false;
         $this->verifyBots = $options['verifyBots'] ?? true;
         $this->powDifficulty = $options['powDifficulty'] ?? 14;
         $this->powTtlMs = $options['powTtlMs'] ?? 60_000;

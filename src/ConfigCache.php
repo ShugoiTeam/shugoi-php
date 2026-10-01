@@ -11,6 +11,7 @@ class ConfigCache
 
     private array $store = [];
     private int $tenantCount = 0;
+    private array $availability = [];
 
     public function __construct(private readonly ApiClient $api) {}
 
@@ -29,8 +30,10 @@ class ConfigCache
                 $this->tenantCount++;
             }
             $this->store[$key] = ['data' => $fresh, 'fetchedAt' => $now];
+            $this->availability[$key] = true;
             return $fresh;
         } catch (\Throwable) {
+            $this->availability[$key] = false;
             if ($entry !== null && ($now - $entry['fetchedAt']) < self::STALE_TTL) {
                 return $entry['data'];
             }
@@ -38,5 +41,6 @@ class ConfigCache
         }
     }
 
-    public function clear(): void { $this->store = []; $this->tenantCount = 0; }
+    public function isAvailable(?string $baseUrl = null): bool { return ($this->availability[$baseUrl ?? 'default'] ?? false) === true; }
+    public function clear(): void { $this->store = []; $this->availability = []; $this->tenantCount = 0; }
 }

@@ -61,27 +61,31 @@ class ApiClientTest extends TestCase
         $this->assertEquals('console.log("guard");', $guard);
     }
 
-    public function test_fetch_guard_sends_signed_cb(): void
+    public function test_all_signed_endpoints_use_fresh_millisecond_callbacks(): void
     {
         $mock = new MockHandler([
-            new Response(200, [], 'ok'),
-            new Response(200, [], 'ok'),
+            new Response(200, [], 'detect'),
+            new Response(200, [], 'guard'),
+            new Response(200, [], '{}'),
         ]);
-        $handler = HandlerStack::create($mock);
         $history = [];
-        $client = new GuzzleClient(['handler' => $handler, 'on_stats' => function ($stats) use (&$history) {
-            $history[] = (string)$stats->getEffectiveUri();
-        }]);
-        $api = new ApiClient($this->config, $client);
-
+        $handler = HandlerStack::create($mock);
+        $handler->push(\GuzzleHttp\Middleware::history($history));
+        $api = new ApiClient($this->config, new GuzzleClient(['handler' => $handler]));
+        $before = (int)floor(microtime(true) * 1000);
         $api->fetchGuardDetect();
         $api->fetchGuard();
+        $api->fetchWhitelist();
+        $after = (int)floor(microtime(true) * 1000);
 
-        foreach ($history as $url) {
-            $this->assertMatchesRegularExpression('/cb=[0-9a-f]{8}/', $url);
-            $cb = (preg_match('/cb=([0-9a-f]+)/', $url, $m)) ? $m[1] : '';
-            $expected = hash_hmac('sha256', $cb, 'test_secret');
-            $this->assertStringContainsString('sig=' . $expected, $url);
+        $this->assertCount(3, $history);
+        foreach ($history as $exchange) {
+            parse_str($exchange['request']->getUri()->getQuery(), $query);
+            // Match the deployed API's freshness and HMAC contract, not just its signature.
+            $this->assertMatchesRegularExpression('/^[1-9][0-9]{0,15}$/D', $query['cb']);
+            $this->assertGreaterThanOrEqual($before, (int)$query['cb']);
+            $this->assertLessThanOrEqual($after, (int)$query['cb']);
+            $this->assertSame(hash_hmac('sha256', $query['cb'], 'test_secret'), $query['sig']);
         }
     }
 

@@ -45,6 +45,9 @@ class Middleware implements PsrMiddlewareInterface
         if ($this->config->autoInject && $this->config->siteKey !== '') {
             try {
                 $cfg = $this->configCache->get($this->config->internalUrl);
+                if ($this->config->failOpenOnUnavailable && !$this->configCache->isAvailable($this->config->internalUrl)) {
+                    return $handler->handle($request);
+                }
                 $skip = $cfg['skipPaths'] ?? [];
             } catch (\Throwable) {
             }
