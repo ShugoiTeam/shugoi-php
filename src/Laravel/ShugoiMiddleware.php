@@ -72,7 +72,7 @@ class ShugoiMiddleware
         if ($deferred !== null) {
             $this->finalizer->defer($request, static function (\Symfony\Component\HttpFoundation\Response $response) use ($deferred): void {
                 $finalResponse = $deferred(new \Nyholm\Psr7\Response(
-                    $response->getStatusCode(), $response->headers->all(), $response->getContent()
+                    $response->getStatusCode(), $response->headers->all(), LivewireNavigation::inject($response->getContent())
                 ));
                 $response->setContent((string)$finalResponse->getBody());
                 $response->setStatusCode($finalResponse->getStatusCode());

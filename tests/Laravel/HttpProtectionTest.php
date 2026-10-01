@@ -163,6 +163,8 @@ final class HttpProtectionTest extends TestCase
         $entry = $this->app->make(HtmlStore::class)->hasFreshToken('sg_laravel_http_fixture', true);
         $this->assertStringContainsString('<script src="/required-captcha.js"></script>', $entry['html']);
         $this->assertSame(1, substr_count($entry['html'], '/required-captcha.js'));
+        $this->assertSame(1, substr_count($entry['html'], 'data-shugoi-livewire-navigation'));
+        $response->assertDontSee('data-shugoi-livewire-navigation', false);
         $this->assertSame(2, $calls, 'RequestHandled must not be dispatched twice to finalize assets.');
         $this->assertStringContainsString('no-store', $response->headers->get('Cache-Control'));
     }
