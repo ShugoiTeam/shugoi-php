@@ -112,7 +112,7 @@ class Obfuscator
         $r = '';
         foreach ($this->javascriptSegments($code) as [$type, $text]) {
             $r .= $type === 'string'
-                ? '_D("' . $this->xorEncrypt($this->runtimeValue($text), $key) . '")'
+                ? ' _D("' . $this->xorEncrypt($this->runtimeValue($text), $key) . '")'
                 : $text;
         }
         return $r;

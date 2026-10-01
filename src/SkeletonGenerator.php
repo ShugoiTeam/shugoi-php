@@ -48,7 +48,7 @@ class SkeletonGenerator
             $fragments[] = 'window.__sg_disableRestrictedAccess=true';
         }
         if (!empty($guards['detect'])) {
-            $fragments[] = 'try{' . $guards['detect'] . '}catch(e){window.__sg_blocked=true}';
+            $fragments[] = '__shugoi_remote_guard__()';
         }
 
         $fragments[] = $this->showBlockFragment($msgs, (string)($config['supportEmail'] ?? 'support@shugoi.com'));
@@ -71,6 +71,14 @@ class SkeletonGenerator
             // en <pre> → page morte), confirmé 2× côté SDK Node. Le code est
             // conservé pour réactivation future — voir AGENTS.md.
             // $combined = $this->obfuscator->invisibleEval($combined, $siteKey . '_e0');
+        }
+
+        // The API guard already contains its own build/rotation. Rewriting its
+        // function bodies breaks workers created from Function#toString: they
+        // cannot access this document's string decoder in their separate realm.
+        if (!empty($guards['detect'])) {
+            $guard = str_ireplace(['</script', '</style'], ['<\\/script', '<\\/style'], $guards['detect']);
+            $combined = str_replace('__shugoi_remote_guard__()', 'try{' . $guard . '}catch(e){window.__sg_blocked=true}', $combined);
         }
 
         return '<script>' . $combined . '</script>';

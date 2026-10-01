@@ -11,6 +11,9 @@ use Shugoi\TokenSigner;
 $obfuscator = new Obfuscator();
 $examples = [
     <<<'JS'
+function compact(){return"ok"} function thrown(){try{throw"error"}catch(e){return e}} window.result=[compact(),thrown(),typeof"text"];
+JS,
+    <<<'JS'
 window.result = /n\'est pas autorisé|not authorized/i.test("not authorized");
 JS,
     <<<'JS'

@@ -83,8 +83,16 @@ class SkeletonGeneratorTest extends TestCase
         $this->assertSame(1, preg_match_all('#</script>#i', $result));
         $this->assertStringNotContainsString('</script><script>', $result);
         $decoded = $this->decodeSkeleton($result);
-        $this->assertStringNotContainsString('alert(1)', $decoded);
+        $this->assertStringContainsString('<\\/script>', $result);
         $this->assertStringContainsString('window.x=', $decoded);
+    }
+
+    public function test_remote_guard_worker_source_remains_self_contained(): void
+    {
+        $guard = 'window.fixtureWorker=function(){self.result="worker-ready";};window.fixtureWorkerSource=window.fixtureWorker.toString();';
+        $result = $this->generator->generate('token', ['detect' => $guard], [], false, 'en', 'https://shugoi.com/api/v1');
+        $this->assertStringContainsString($guard, $result);
+        $this->assertStringNotContainsString('__shugoi_remote_guard__()', $result);
     }
 
     public function test_showBlock_function_present_in_decoded_code(): void
