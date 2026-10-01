@@ -85,6 +85,16 @@ directory must remain private and shared between the Laravel web workers. Keep
 route on the Shugoi allowlist. API exclusions keep their own application
 authentication and authorization.
 
+### Livewire pages
+
+Laravel split-render protection captures the final HTML after normal
+`RequestHandled` listeners have injected assets, including Livewire's `@assets`.
+Protected pages convert `wire:navigate` and `Livewire.navigate()` transitions to
+full document navigation so each page gets a fresh Shugoi verification lifecycle.
+Back/forward transitions preserve browser history. Livewire component/form
+requests still use their normal endpoint; it does not need an HTML-protection
+exception for this integration.
+
 ## Nginx
 
 Add this exact location to the TLS virtual host serving the PHP application:

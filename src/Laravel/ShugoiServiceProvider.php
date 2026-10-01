@@ -27,6 +27,7 @@ class ShugoiServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__ . '/../../config/shugoi.php', 'shugoi');
+        $this->app->singleton(ResponseFinalizer::class);
 
         $this->app->singleton(Config::class, fn($app) => new Config($app['config']['shugoi']));
         $this->app->singleton(ApiClient::class, fn($app) => new ApiClient($app->make(Config::class)));
@@ -101,6 +102,7 @@ class ShugoiServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        $this->app->make(ResponseFinalizer::class)->register($this->app->make(\Illuminate\Contracts\Events\Dispatcher::class));
         $this->publishes([__DIR__ . '/../../config/shugoi.php' => config_path('shugoi.php')], 'shugoi-config');
         $this->loadRoutesFrom(__DIR__ . '/../../routes/shugoi.php');
 
