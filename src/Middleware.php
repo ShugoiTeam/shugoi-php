@@ -8,6 +8,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface as PsrMiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Nyholm\Psr7\Response;
+use Nyholm\Psr7\Stream;
 
 class Middleware implements PsrMiddlewareInterface
 {
@@ -40,23 +41,25 @@ class Middleware implements PsrMiddlewareInterface
         if ($path === '/__sg_challenge' && !in_array($method, ['GET', 'HEAD'], true)) {
             return $this->methodNotAllowed();
         }
+        $skip = [];
         if ($this->config->autoInject && $this->config->siteKey !== '') {
             try {
                 $cfg = $this->configCache->get($this->config->internalUrl);
                 $skip = $cfg['skipPaths'] ?? [];
-                if (in_array($path, $skip, true)) {
-                    $response = $handler->handle($request);
-                    $contentType = $response->getHeaderLine('Content-Type');
-                    $body = (string)$response->getBody();
-                    if (($contentType === '' || str_contains($contentType, 'text/html')) && str_contains($body, '<html')) {
-                        $body = $this->injector->injectSkipNavigationGuard($body, $skip);
-                        $response->getBody()->rewind();
-                        $response->getBody()->write($body);
-                    }
-                    return $response;
-                }
             } catch (\Throwable) {
             }
+        }
+        if (is_array($skip) && in_array($path, $skip, true)) {
+            $response = $handler->handle($request)->withoutHeader('X-Shugoi-Unbuffered');
+            if ($method === 'HEAD') {
+                return $response->withBody(Stream::create(''));
+            }
+            $contentType = $response->getHeaderLine('Content-Type');
+            $body = (string)$response->getBody();
+            if (($contentType === '' || str_contains($contentType, 'text/html')) && preg_match('/<html\b/i', $body)) {
+                $response = $this->replaceBody($response, $this->injector->injectSkipNavigationGuard($body, $skip));
+            }
+            return $response;
         }
 
         $csp = $this->cspBuilder->build();
@@ -77,7 +80,10 @@ class Middleware implements PsrMiddlewareInterface
             'acceptLanguage' => $acceptLanguage,
             'secFetchDest' => $secFetchDest,
             'secFetchMode' => $secFetchMode,
-            'sgProof' => (isset($query['sg_proof']) && is_string($query['sg_proof'])) ? $query['sg_proof'] : null,
+            'sgReceipt' => $method !== 'HEAD' && isset($query['sg_receipt']) && is_string($query['sg_receipt']) ? $query['sg_receipt'] : null,
+            'method' => $method,
+            'secure' => $request->getUri()->getScheme() === 'https',
+            'requestTarget' => $this->cleanRequestTarget($request),
             'sgOk' => $this->cookieValue($request, '__sg_ok'),
             'sgAuthorized' => $this->cookieValue($request, '__sg_authorized'),
             'forwardedPrefix' => $request->getHeaderLine('X-Forwarded-Prefix') ?: null,
@@ -91,40 +97,30 @@ class Middleware implements PsrMiddlewareInterface
             if (!empty($block['headers'])) {
                 $headers = array_merge($headers, $block['headers']);
             }
-            return new Response($block['status'], $headers, $block['body']);
+            return new Response($block['status'], $headers, $method === 'HEAD' ? '' : $block['body']);
         }
 
         $response = $handler->handle($request);
+        $unbuffered = $response->getHeaderLine('X-Shugoi-Unbuffered') === '1';
+        $response = $response->withoutHeader('X-Shugoi-Unbuffered');
+        if ($method === 'HEAD') {
+            return $response->withBody(Stream::create(''));
+        }
         if ($this->isMetadataCrawlerDocument($path, $ua)) {
             $originalBody = (string)$response->getBody();
             $metadataBody = MetadataOnly::extract($originalBody, (string)$request->getUri());
             if ($metadataBody === '') {
                 $metadataBody = MetadataOnly::fallback((string)$request->getUri());
             }
-            $stream = $response->getBody();
-            $stream->rewind();
-            $stream->write($metadataBody);
-            $stream->truncate($stream->tell());
-            $response = $response
+            $response = $this->replaceBody($response, $metadataBody)
                 ->withHeader('Content-Type', 'text/html; charset=UTF-8')
                 ->withHeader('Cache-Control', 'public, max-age=300');
-            if ($method === 'HEAD') {
-                $stream->rewind();
-                $stream->truncate(0);
-            }
             return $response;
         }
         if ($this->config->csp) {
             $existing = $response->getHeaderLine('Content-Security-Policy');
             $response = $response->withHeader('Content-Security-Policy', $existing === '' ? $csp : CspBuilder::merge($existing, $csp));
         }
-        if (isset($query['sg_proof']) && is_string($query['sg_proof'])) {
-            $okCookie = $this->pow()->sgOkCookie($query['sg_proof'], $ip, $ua);
-            if ($okCookie !== null) {
-                $response = $response->withAddedHeader('Set-Cookie', $okCookie);
-            }
-        }
-
         $body = (string)$response->getBody();
         if (
             $this->config->autoInject && $this->config->splitRender
@@ -132,21 +128,34 @@ class Middleware implements PsrMiddlewareInterface
         ) {
             $contentType = $response->getHeaderLine('Content-Type');
             if (str_contains($contentType, 'text/html') || $contentType === '') {
-                if (!empty($body) && str_contains($body, '<html')) {
+                if ($unbuffered) {
+                    return new Response(503, [
+                        'Content-Type' => 'text/plain; charset=UTF-8',
+                        'Cache-Control' => 'no-store',
+                    ], 'Shugoi split rendering requires a buffered HTML response.');
+                }
+                if ($body !== '' && preg_match('/<html\b/i', $body)) {
                     try {
-                        $renderUrl = $this->publicRenderUrl ?: ($host ?: 'localhost') . '/__shugoi/render';
+                        $basePath = $request->getAttribute('shugoi.basePath', '');
+                        $basePath = is_string($basePath) ? '/' . trim($basePath, '/') : '';
+                        $renderUrl = $this->publicRenderUrl ?: rtrim($basePath, '/') . '/__shugoi/render';
                         $body = $this->injector->inject($body, $path, $ua, $ip, $host ?? '', $acceptLanguage, $renderUrl);
+                        $response = $this->replaceBody($response, $body)
+                            ->withHeader('Cache-Control', 'no-store, no-cache, must-revalidate, no-transform')
+                            ->withHeader('Pragma', 'no-cache');
                     } catch (\Throwable $e) {
                         if ($this->config->debug) {
                             error_log("Shugoi inject failed: " . $e->getMessage());
                         }
+                        return new Response(503, [
+                            'Content-Type' => 'text/plain; charset=UTF-8',
+                            'Cache-Control' => 'no-store',
+                            'Retry-After' => '30',
+                        ], 'Shugoi protection is temporarily unavailable. Please try again.');
                     }
                 }
             }
         }
-
-        $response->getBody()->rewind();
-        $response->getBody()->write($body);
 
         return $response;
     }
@@ -154,19 +163,26 @@ class Middleware implements PsrMiddlewareInterface
     private function handleRender(ServerRequestInterface $request): ResponseInterface
     {
         $params = $request->getQueryParams();
-        $token = (string)($params['token'] ?? '');
-        $mid = (string)($params['mid'] ?? '');
-        $grant = (string)($params['grant'] ?? '');
+        $headers = [
+            'Content-Type' => 'application/json',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate, no-transform',
+            'Pragma' => 'no-cache',
+        ];
+        if (strtoupper($request->getMethod()) === 'HEAD') {
+            return new Response(200, $headers);
+        }
+        $token = is_string($params['token'] ?? null) ? $params['token'] : '';
+        $mid = is_string($params['mid'] ?? null) ? $params['mid'] : '';
+        $grant = is_string($params['grant'] ?? null) ? $params['grant'] : '';
         $ip = $this->clientIp($request);
 
         $data = ($this->renderService ?? new RenderService($this->config, $this->htmlStore, $this->tokenSigner, $this->configCache))->render($token, $mid, $grant, $ip);
 
-        $headers = ['Content-Type' => 'application/json'];
         if (isset($data['html'])) {
             $headers['Referrer-Policy'] = 'strict-origin-when-cross-origin';
             $headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, no-transform';
             $headers['Pragma'] = 'no-cache';
-            $headers['Set-Cookie'] = $this->pow()->sgAuthorizedCookie();
+            $headers['Set-Cookie'] = $this->pow()->sgAuthorizedCookie($request->getUri()->getScheme() === 'https');
         }
         return new Response(200, $headers, json_encode($data));
     }
@@ -177,11 +193,19 @@ class Middleware implements PsrMiddlewareInterface
 
     private function clientIp(ServerRequestInterface $request): string
     {
-        $xff = $request->getHeaderLine('X-Forwarded-For');
-        if ($xff !== '') {
-            return trim(explode(',', $xff)[0]);
-        }
+        $resolved = $request->getAttribute('shugoi.clientIp');
+        if (is_string($resolved) && filter_var($resolved, FILTER_VALIDATE_IP)) return $resolved;
         return (string)($request->getServerParams()['REMOTE_ADDR'] ?? '');
+    }
+
+    private function cleanRequestTarget(ServerRequestInterface $request): string
+    {
+        $parts = array_filter(explode('&', $request->getUri()->getQuery()), static function (string $part): bool {
+            $name = urldecode(explode('=', $part, 2)[0]);
+            return $name !== 'sg_receipt' && $name !== 'sg_proof';
+        });
+        $query = implode('&', $parts);
+        return ($request->getUri()->getPath() ?: '/') . ($query === '' ? '' : '?' . $query);
     }
 
     private function cookieValue(ServerRequestInterface $request, string $name): ?string
@@ -195,7 +219,15 @@ class Middleware implements PsrMiddlewareInterface
 
     private function methodNotAllowed(): ResponseInterface
     {
-        return new Response(405, ['Content-Type' => 'application/json'], json_encode(['error' => 'method_not_allowed']));
+        return new Response(405, ['Content-Type' => 'application/json', 'Cache-Control' => 'no-store', 'Allow' => 'GET, HEAD'], json_encode(['error' => 'method_not_allowed']));
+    }
+
+    private function replaceBody(ResponseInterface $response, string $body): ResponseInterface
+    {
+        return $response->withBody(Stream::create($body))
+            ->withoutHeader('Content-Length')
+            ->withoutHeader('ETag')
+            ->withoutHeader('Last-Modified');
     }
 
     private function isMetadataCrawlerDocument(string $path, string $ua): bool

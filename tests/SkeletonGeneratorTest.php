@@ -9,6 +9,19 @@ use Shugoi\Config;
 
 class SkeletonGeneratorTest extends TestCase
 {
+    public function testTransportAndTokenExistBeforeTheGuardAndPowHasNonce(): void
+    {
+        $signer = new TokenSigner(new Config(['siteKey' => 'fixture', 'secret' => 'offline-only']));
+        $html = (new SkeletonGenerator($signer))->generate('signed-token',
+            ['detect' => 'window.fixtureGuardRuns=true'], [], false, 'en', 'https://shugoi.com/api/v1', '/sub/__shugoi/render', 'fixture');
+        $guardOffset = strpos($html, 'window.fixtureGuardRuns');
+        $this->assertLessThan($guardOffset, strpos($html, 'window.__sg_wsMux'));
+        $this->assertLessThan($guardOffset, strpos($html, 'window.__sg_token="signed-token"'));
+        preg_match('/window\.__sg_pow=(\{[^}]+\})/', $html, $matches);
+        $challenge = json_decode($matches[1], true, 512, JSON_THROW_ON_ERROR);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{16}$/', $challenge['nonce']);
+        $this->assertSame(hash_hmac('sha256', $challenge['ts'] . ':' . $challenge['nonce'], 'offline-only'), $challenge['salt']);
+    }
     private SkeletonGenerator $generator;
 
     protected function setUp(): void

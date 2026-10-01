@@ -99,4 +99,70 @@ class PowTest extends TestCase
         $this->assertStringContainsString('__sg_authorized=', $cookie);
         $this->assertStringContainsString('Max-Age=120', $cookie);
     }
+
+    public function test_https_authorized_cookie_is_secure_without_runtime_environment(): void
+    {
+        $environment = [];
+        foreach (['APP_ENV', 'NODE_ENV'] as $name) {
+            $environment[$name] = [getenv($name), array_key_exists($name, $_SERVER), $_SERVER[$name] ?? null];
+            putenv($name);
+            unset($_SERVER[$name]);
+        }
+        try {
+            $this->assertStringContainsString('; Secure', $this->makePow()->sgAuthorizedCookie(true));
+            $this->assertStringNotContainsString('; Secure', $this->makePow()->sgAuthorizedCookie());
+            putenv('APP_ENV=production');
+            $this->assertStringContainsString('; Secure', $this->makePow()->sgAuthorizedCookie());
+        } finally {
+            foreach ($environment as $name => [$value, $exists, $serverValue]) {
+                putenv($value === false ? $name : $name . '=' . $value);
+                if ($exists) $_SERVER[$name] = $serverValue;
+                else unset($_SERVER[$name]);
+            }
+        }
+    }
+
+    public function test_challenge_is_server_signed_and_bounded(): void
+    {
+        $pow = $this->makePow(4);
+        $challenge = $pow->challenge();
+        $this->assertSame(4, $challenge['difficulty']);
+        $this->assertLessThanOrEqual(1, abs(time() - $challenge['ts']));
+        $this->assertMatchesRegularExpression('/^[a-f0-9]{16}$/', $challenge['nonce']);
+        $this->assertSame(hash_hmac('sha256', $challenge['ts'] . ':' . $challenge['nonce'], $pow->secret()), $challenge['salt']);
+    }
+
+    public function test_future_expired_and_malformed_proofs_are_refused_even_if_work_matches(): void
+    {
+        $pow = $this->makePow(1);
+        foreach ([time() + 10, time() - 61] as $timestamp) {
+            $nonce = str_repeat('b', 16);
+            $salt = hash_hmac('sha256', $timestamp . ':' . $nonce, $pow->secret());
+            $solution = 0;
+            while ($pow->leadingZeroBits(hash('sha256', $salt . ':' . dechex($solution))) < 1) ++$solution;
+            $this->assertFalse($pow->isValid($timestamp . ':' . $nonce . ':' . dechex($solution)));
+        }
+        foreach (['0', '1e9', '-1', str_repeat('9', 30)] as $timestamp) {
+            $this->assertFalse($pow->isValid($timestamp . ':' . str_repeat('a', 16) . ':0'));
+        }
+        $this->assertFalse($pow->isValid(time() . ':' . str_repeat('a', 16) . ':' . str_repeat('f', 17)));
+    }
+
+    public function test_missing_and_empty_secrets_fail_closed(): void
+    {
+        foreach ([null, ''] as $secret) {
+            $pow = new Pow(new Config(['siteKey' => 'sg_sk_test', 'secret' => $secret]));
+            $this->assertFalse($pow->isValid(time() . ':' . str_repeat('a', 16) . ':0'));
+            $this->assertFalse($pow->isSgOkValid('x'));
+            $this->assertFalse($pow->isSgAuthorizedValid('x'));
+            foreach (['challenge', 'sgOkValue', 'sgAuthorizedValue'] as $method) {
+                try {
+                    $pow->$method();
+                    $this->fail($method . ' must require a signing secret');
+                } catch (\RuntimeException $error) {
+                    $this->assertSame('No signing secret configured', $error->getMessage());
+                }
+            }
+        }
+    }
 }

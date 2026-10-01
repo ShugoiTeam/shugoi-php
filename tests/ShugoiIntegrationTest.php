@@ -14,6 +14,7 @@ use Shugoi\CspBuilder;
 use Shugoi\HtmlStore;
 use Shugoi\TokenSigner;
 use Shugoi\Pow;
+use Shugoi\PowReceipt;
 use Psr\Http\Server\RequestHandlerInterface;
 use Nyholm\Psr7\ServerRequest;
 use Nyholm\Psr7\Response as Psr7Response;
@@ -71,8 +72,7 @@ class ShugoiIntegrationTest extends TestCase
     {
         $middleware = $this->createFullStack();
         $config = new Config(['siteKey' => 'sg_sk_test_abc', 'secret' => 'test_secret', 'powDifficulty' => 10]);
-        $proof = $this->solvePow($config, 10);
-        $request = new ServerRequest('GET', '/?sg_proof=' . urlencode($proof));
+        $request = (new ServerRequest('GET', '/'))->withHeader('Cookie', '__sg_ok=' . (new Pow($config))->sgOkValue('', 'Mozilla/5.0 Chrome/120'));
         $request = $request
             ->withHeader('User-Agent', 'Mozilla/5.0 Chrome/120')
             ->withHeader('Accept-Language', 'en-US')
@@ -103,8 +103,7 @@ class ShugoiIntegrationTest extends TestCase
     {
         $middleware = $this->createFullStack();
         $config = new Config(['siteKey' => 'sg_sk_test_abc', 'secret' => 'test_secret', 'powDifficulty' => 10]);
-        $proof = $this->solvePow($config, 10);
-        $request = new ServerRequest('GET', '/?sg_proof=' . urlencode($proof));
+        $request = (new ServerRequest('GET', '/'))->withHeader('Cookie', '__sg_ok=' . (new Pow($config))->sgOkValue('', 'Mozilla/5.0 Chrome/120'));
         $request = $request->withHeader('User-Agent', 'Mozilla/5.0 Chrome/120');
         $handler = $this->createMock(RequestHandlerInterface::class);
         $handler->method('handle')->willReturn(new Psr7Response(200, ['Content-Type' => 'text/html'], '<html><head></head><body>Hello</body></html>'));
@@ -118,7 +117,7 @@ class ShugoiIntegrationTest extends TestCase
         $mid = str_repeat('a', 64);
         $ts = time();
         $ts36 = base_convert((string)$ts, 10, 36);
-        $sig = hash_hmac('sha256', 'render-grant:sg_sk_test_abc:' . $mid . ':' . $token . ':127.0.0.1:' . $ts36, 'test_secret');
+        $sig = hash_hmac('sha256', 'render-grant:sg_sk_test_abc:' . $mid . ':' . $token . ':' . $ts36, 'test_secret');
         $grant = $ts36 . ':' . $sig;
 
         $render = new ServerRequest('GET', '/__shugoi/render?token=' . urlencode($token) . '&mid=' . $mid . '&grant=' . urlencode($grant), [], null, '1.1', ['REMOTE_ADDR' => '127.0.0.1']);
@@ -133,14 +132,17 @@ class ShugoiIntegrationTest extends TestCase
         $this->assertStringContainsString('Hello', $data['html']);
         $this->assertStringContainsString('__sg_o', $data['html']);
         $this->assertStringContainsString('name="referrer" content="strict-origin-when-cross-origin"', $data['html']);
+
+        $replay = $middleware->process($render, $renderHandler);
+        $this->assertSame(['error' => 'not_found'], json_decode((string)$replay->getBody(), true));
+        $this->assertSame('', $replay->getHeaderLine('Set-Cookie'));
     }
 
     public function test_render_without_grant_is_not_found(): void
     {
         $middleware = $this->createFullStack();
         $config = new Config(['siteKey' => 'sg_sk_test_abc', 'secret' => 'test_secret', 'powDifficulty' => 10]);
-        $proof = $this->solvePow($config, 10);
-        $request = new ServerRequest('GET', '/?sg_proof=' . urlencode($proof));
+        $request = (new ServerRequest('GET', '/'))->withHeader('Cookie', '__sg_ok=' . (new Pow($config))->sgOkValue('', 'Mozilla/5.0 Chrome/120'));
         $request = $request->withHeader('User-Agent', 'Mozilla/5.0 Chrome/120');
         $handler = $this->createMock(RequestHandlerInterface::class);
         $handler->method('handle')->willReturn(new Psr7Response(200, ['Content-Type' => 'text/html'], '<html><body>Hello</body></html>'));
@@ -153,5 +155,40 @@ class ShugoiIntegrationTest extends TestCase
         $data = json_decode((string)$response->getBody(), true);
         $this->assertEquals('not_found', $data['error']);
         $this->assertEquals('', $response->getHeaderLine('Set-Cookie'));
+    }
+
+    public function test_websocket_receipt_redirect_sets_bound_cookie_before_guarded_navigation(): void
+    {
+        $middleware = $this->createFullStack();
+        $config = new Config(['siteKey' => 'sg_sk_test_abc', 'secret' => 'test_secret', 'powDifficulty' => 10]);
+        $ip = '203.0.113.8';
+        $ua = 'Mozilla/5.0 Chrome/120';
+        $receipt = (new PowReceipt($config))->issue($ip, $ua);
+        $url = 'https://example.test/settings?tab=plugins&q=a%2Bb&sg_receipt=' . urlencode($receipt) . '&sg_proof=legacy';
+        $request = new ServerRequest('GET', $url, ['User-Agent' => $ua], null, '1.1', ['REMOTE_ADDR' => $ip]);
+        $blockedHandler = $this->createMock(RequestHandlerInterface::class);
+        $blockedHandler->expects($this->never())->method('handle');
+        $admission = $middleware->process($request, $blockedHandler);
+        $this->assertSame(303, $admission->getStatusCode());
+        $this->assertSame('/settings?tab=plugins&q=a%2Bb', $admission->getHeaderLine('Location'));
+        $this->assertSame('no-store', $admission->getHeaderLine('Cache-Control'));
+        $this->assertSame('no-referrer', $admission->getHeaderLine('Referrer-Policy'));
+        $this->assertStringContainsString('; Secure', $admission->getHeaderLine('Set-Cookie'));
+        $cookie = explode(';', $admission->getHeaderLine('Set-Cookie'), 2)[0];
+        $this->assertTrue((new Pow($config))->isSgOkValid(substr($cookie, strlen('__sg_ok=')), $ip, $ua));
+
+        $replay = $middleware->process($request, $blockedHandler);
+        $this->assertSame(200, $replay->getStatusCode());
+        $this->assertStringContainsString('new WebSocket', (string)$replay->getBody());
+        $this->assertSame('', $replay->getHeaderLine('Set-Cookie'));
+
+        $navigation = new ServerRequest('GET', 'https://example.test/settings?tab=plugins&q=a%2Bb',
+            ['User-Agent' => $ua, 'Cookie' => $cookie], null, '1.1', ['REMOTE_ADDR' => $ip]);
+        $handler = $this->createMock(RequestHandlerInterface::class);
+        $handler->expects($this->once())->method('handle')->willReturn(new Psr7Response(200, ['Content-Type' => 'text/html'], '<html><body>private settings</body></html>'));
+        $protected = $middleware->process($navigation, $handler);
+        $this->assertSame(200, $protected->getStatusCode());
+        $this->assertStringContainsString('window.__sg_token=', (string)$protected->getBody());
+        $this->assertStringNotContainsString('private settings', (string)$protected->getBody());
     }
 }

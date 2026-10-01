@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Move preflight PoW to a supervised PHP WebSocket gateway, with short-lived,
+  IP/UA-bound admission receipts consumed once across web workers.
+- Restore browser guard WebSocket transport and require signed, single-use HTML
+  rendering for standalone PHP and Laravel.
+- Preserve Laravel's raw query string, sessions and application cookies through
+  the protected request flow; keep authorization cookies Secure on HTTPS even
+  when environment values are available only in Laravel's cached configuration.
+- Add Laravel HTTP-kernel regression coverage and deployment instructions for
+  global middleware, trusted proxies, private storage and the gateway service.
+
 ## 0.4.12
 
 ### Maintenance

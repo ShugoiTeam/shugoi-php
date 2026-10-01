@@ -28,7 +28,8 @@ class Pow
     {
         $ts = time();
         $nonce = $this->nonce();
-        return ['ts' => $ts, 'nonce' => $nonce, 'salt' => $this->salt($ts, $nonce), 'difficulty' => $this->difficulty()];
+        $this->config->getSigningSecret();
+        return ['ts' => $ts, 'nonce' => $nonce, 'salt' => $this->salt((string)$ts, $nonce), 'difficulty' => $this->difficulty()];
     }
     public function isValid(string $proof): bool
     {
@@ -36,11 +37,11 @@ class Pow
         $parts = explode(':', $proof);
         if (count($parts) !== 3) return false;
         [$tsStr, $nonce, $solution] = $parts;
-        if ($tsStr === '' || $nonce === '' || $solution === '') return false;
+        if (!preg_match('/\A[0-9]{10}\z/', $tsStr) || !preg_match('/\A[0-9a-f]{1,16}\z/', $solution)) return false;
         if (!preg_match('/^[0-9a-f]{16}$/', $nonce)) return false;
         $ts = (int)$tsStr;
         if ($ts <= 0) return false;
-        if (abs(($this->nowMs() - $ts * 1000)) > $this->ttlMs()) return false;
+        if ($ts * 1000 > $this->nowMs() + 5000 || $this->nowMs() - $ts * 1000 > $this->ttlMs()) return false;
 
         $digest = hash('sha256', $this->salt($tsStr, $nonce) . ':' . $solution);
         return $this->leadingZeroBits($digest) >= $this->difficulty();
@@ -62,6 +63,7 @@ class Pow
     }
     public function sgOkValue(string $ip = '', string $ua = ''): string
     {
+        $this->config->getSigningSecret();
         $ts = time();
         $bucket = $this->ipBucket($ip);
         $fp = $this->uaFp($ua);
@@ -92,6 +94,7 @@ class Pow
 
     public function sgAuthorizedValue(): string
     {
+        $this->config->getSigningSecret();
         $ts = time();
         return $ts . ':' . hash_hmac('sha256', 'sg_authorized:' . $ts, $this->secret());
     }
@@ -110,11 +113,11 @@ class Pow
         return hash_equals(hash_hmac('sha256', 'sg_authorized:' . $tsStr, $this->secret()), $sig);
     }
 
-    public function sgAuthorizedCookie(): string
+    public function sgAuthorizedCookie(bool $secure = false): string
     {
-        $secure = $this->isProduction() ? '; Secure' : '';
+        $secureAttribute = $secure || $this->isProduction() ? '; Secure' : '';
         return '__sg_authorized=' . $this->sgAuthorizedValue()
-            . '; Path=/; HttpOnly; SameSite=Strict; Max-Age=120' . $secure;
+            . '; Path=/; HttpOnly; SameSite=Strict; Max-Age=120' . $secureAttribute;
     }
 
     private function nonce(): string

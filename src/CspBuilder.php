@@ -11,6 +11,7 @@ class CspBuilder
         // temporairement retirée (crash WebKit/Safari, voir SkeletonGenerator).
         'script-src' => ["'self'", "'unsafe-inline'"],
         'connect-src' => ["'self'"],
+        'worker-src' => ["'self'", 'blob:'],
         'style-src' => ["'self'", "'unsafe-inline'"],
         'font-src' => ["'self'", 'data:'],
         'img-src' => ["'self'", 'data:', 'blob:'],
@@ -36,6 +37,20 @@ class CspBuilder
             if (!in_array($shugoiOrigin, $directives[$dir])) {
                 $directives[$dir][] = $shugoiOrigin;
             }
+        }
+        foreach (array_unique(array_filter([$apiOrigin, $shugoiOrigin])) as $origin) {
+            if (str_starts_with($origin, 'https://')) {
+                $directives['connect-src'][] = 'wss://' . substr($origin, 8);
+            } elseif (str_starts_with($origin, 'http://')) {
+                $directives['connect-src'][] = 'ws://' . substr($origin, 7);
+            }
+        }
+        $powEndpoint = parse_url($this->config->powWebSocketUrl);
+        if (is_array($powEndpoint) && isset($powEndpoint['scheme'], $powEndpoint['host'])
+            && in_array($powEndpoint['scheme'], ['http', 'https', 'ws', 'wss'], true)) {
+            $scheme = in_array($powEndpoint['scheme'], ['https', 'wss'], true) ? 'wss' : 'ws';
+            $directives['connect-src'][] = $scheme . '://' . $powEndpoint['host']
+                . (isset($powEndpoint['port']) ? ':' . $powEndpoint['port'] : '');
         }
         // La couche invisible-eval étant temporairement retirée (crash WebKit,
         // voir SkeletonGenerator), plus besoin d''unsafe-eval' — le CSP reste

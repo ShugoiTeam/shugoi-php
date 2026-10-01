@@ -18,6 +18,7 @@ use Shugoi\Pow;
 use Shugoi\Middleware;
 use Shugoi\ScriptTags;
 use Shugoi\RenderService;
+use Shugoi\Obfuscator;
 use Shugoi\Laravel\Commands\ShugoiSetupCommand;
 use Shugoi\Laravel\Commands\ShugoiCheckCommand;
 
@@ -31,7 +32,14 @@ class ShugoiServiceProvider extends ServiceProvider
         $this->app->singleton(ApiClient::class, fn($app) => new ApiClient($app->make(Config::class)));
         $this->app->singleton(ConfigCache::class, fn($app) => new ConfigCache($app->make(ApiClient::class)));
         $this->app->singleton(GuardCache::class, fn($app) => new GuardCache($app->make(ApiClient::class)));
-        $this->app->singleton(HtmlStore::class, fn($app) => new HtmlStore($app->make(Config::class)->multiProcess));
+        $this->app->singleton(HtmlStore::class, function ($app) {
+            $config = $app->make(Config::class);
+            $path = $config->renderStorePath;
+            if ($path === null && $config->multiProcess) {
+                $path = $app->storagePath('framework/cache/shugoi-render/' . hash('sha256', $config->siteKey));
+            }
+            return new HtmlStore($path ?? false);
+        });
         $this->app->singleton(TokenSigner::class, fn($app) => new TokenSigner($app->make(Config::class)));
         $this->app->singleton(Pow::class, fn($app) => new Pow($app->make(Config::class)));
         $this->app->singleton(RenderService::class, fn($app) => new RenderService(
@@ -41,6 +49,7 @@ class ShugoiServiceProvider extends ServiceProvider
             $app->make(ConfigCache::class),
         ));
         $this->app->singleton(CspBuilder::class, fn($app) => new CspBuilder($app->make(Config::class)));
+        $this->app->singleton(Obfuscator::class, fn() => new Obfuscator());
         $this->app->singleton(SkeletonGenerator::class, fn($app) => new SkeletonGenerator(
             $app->make(TokenSigner::class),
             $app->make(Obfuscator::class),
@@ -58,6 +67,7 @@ class ShugoiServiceProvider extends ServiceProvider
             $app->make(HtmlStore::class),
             $app->make(GuardCache::class),
             $app->make(ConfigCache::class),
+            $app->make(SkeletonGenerator::class),
         ));
         $this->app->singleton(Middleware::class, function ($app) {
             $c = $app->make(Config::class);

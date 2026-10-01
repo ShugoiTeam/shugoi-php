@@ -14,6 +14,7 @@ use Shugoi\CspBuilder;
 use Shugoi\HtmlStore;
 use Shugoi\TokenSigner;
 use Shugoi\Pow;
+use Shugoi\RenderService;
 use Psr\Http\Server\RequestHandlerInterface;
 use Nyholm\Psr7\ServerRequest;
 use Nyholm\Psr7\Response as Psr7Response;
@@ -132,7 +133,7 @@ class MiddlewareTest extends TestCase
         $this->assertStringContainsString('Shugoi', (string)$response->getBody());
     }
 
-    public function test_browser_gets_307_challenge_without_proof(): void
+    public function test_browser_gets_websocket_challenge_without_admission_cookie(): void
     {
         $middleware = $this->createMiddleware();
         $request = new ServerRequest('GET', '/');
@@ -140,26 +141,30 @@ class MiddlewareTest extends TestCase
         $handler = $this->createMock(RequestHandlerInterface::class);
         $handler->expects($this->never())->method('handle');
         $response = $middleware->process($request, $handler);
-        $this->assertEquals(307, $response->getStatusCode());
-        $this->assertStringContainsString('/__sg_challenge', $response->getHeaderLine('Location'));
+        $this->assertEquals(200, $response->getStatusCode());
+        $this->assertStringContainsString('/__sg_challenge/ws', str_replace('\\/', '/', (string)$response->getBody()));
+        $this->assertStringContainsString('no-store', $response->getHeaderLine('Cache-Control'));
     }
 
-    public function test_browser_with_proof_passes_and_gets_ok_cookie(): void
+    public function test_browser_with_websocket_receipt_gets_cookie_and_preserves_clean_query(): void
     {
         $middleware = $this->createMiddleware([], 5);
         $config = new Config(['siteKey' => 'sg_sk_test_abc', 'secret' => 'test_secret', 'powDifficulty' => 10]);
-        $proof = $this->solvePow($config, 10);
-        $request = new ServerRequest('GET', '/?sg_proof=' . urlencode($proof));
+        $receipt = (new \Shugoi\PowReceipt($config))->issue('', 'Mozilla/5.0 Chrome/120');
+        $request = new ServerRequest('GET', 'https://example.test/?x=1&sg_receipt=' . urlencode($receipt) . '&x=2&q=%2F%20');
         $request = $request
+            ->withQueryParams(['sg_receipt' => $receipt, 'x' => '2', 'q' => '/ '])
             ->withHeader('User-Agent', 'Mozilla/5.0 Chrome/120')
             ->withHeader('Accept-Language', 'en-US')
             ->withHeader('Sec-Fetch-Dest', 'document')
             ->withHeader('Sec-Fetch-Mode', 'navigate');
         $handler = $this->createMock(RequestHandlerInterface::class);
-        $handler->method('handle')->willReturn(new Psr7Response(200, ['Content-Type' => 'text/html'], '<html><body>Hello</body></html>'));
+        $handler->expects($this->never())->method('handle');
         $response = $middleware->process($request, $handler);
-        $this->assertEquals(200, $response->getStatusCode());
+        $this->assertEquals(303, $response->getStatusCode());
+        $this->assertSame('/?x=1&x=2&q=%2F%20', $response->getHeaderLine('Location'));
         $this->assertStringContainsString('__sg_ok=', $response->getHeaderLine('Set-Cookie'));
+        $this->assertStringContainsString('; Secure', $response->getHeaderLine('Set-Cookie'));
     }
 
     public function test_csp_header_is_set(): void
@@ -208,5 +213,104 @@ class MiddlewareTest extends TestCase
         $response = $middleware->process($request, $handler);
         $this->assertEquals(200, $response->getStatusCode());
         $this->assertStringContainsString('docs', (string)$response->getBody());
+    }
+
+    private function isolatedMiddleware(?GuardInjector $injector = null, ?RenderService $renderService = null): Middleware
+    {
+        $config = new Config(['siteKey' => 'sg_sk_test_isolated', 'secret' => 'test_secret']);
+        $api = $this->createMock(ApiClient::class);
+        $core = $this->createMock(Core::class);
+        $core->method('evaluate')->willReturn(null);
+        $cache = $this->createMock(ConfigCache::class);
+        $cache->method('get')->willReturn(['skipPaths' => []]);
+        return new Middleware($config, $core, $api, $cache, new GuardCache($api), new HtmlStore(), new CspBuilder($config), $injector ?? $this->createMock(GuardInjector::class), new TokenSigner($config), new Pow($config), $renderService);
+    }
+
+    public function test_replaces_stream_without_leaking_suffix_and_uses_same_origin_render_url(): void
+    {
+        $injector = $this->createMock(GuardInjector::class);
+        $injector->expects($this->once())->method('inject')
+            ->with($this->anything(), '/', '', '', 'example.com', null, '/__shugoi/render')
+            ->willReturn('<html>guard</html>');
+        $handler = $this->createMock(RequestHandlerInterface::class);
+        $original = new Psr7Response(200, ['Content-Type' => 'text/html', 'Content-Length' => '1000', 'ETag' => 'private'], '<html>' . str_repeat('private-content', 50) . '</html>');
+        $handler->method('handle')->willReturn($original);
+        $response = $this->isolatedMiddleware($injector)->process(new ServerRequest('GET', 'https://example.com/'), $handler);
+        $this->assertSame('<html>guard</html>', (string)$response->getBody());
+        $this->assertStringContainsString('private-content', (string)$original->getBody());
+        $this->assertFalse($response->hasHeader('Content-Length'));
+        $this->assertFalse($response->hasHeader('ETag'));
+        $this->assertStringContainsString('no-store', $response->getHeaderLine('Cache-Control'));
+    }
+
+    public function test_injection_failure_never_returns_unprotected_html(): void
+    {
+        $injector = $this->createMock(GuardInjector::class);
+        $injector->method('inject')->willThrowException(new \RuntimeException('guard unavailable'));
+        $handler = $this->createMock(RequestHandlerInterface::class);
+        $handler->method('handle')->willReturn(new Psr7Response(200, ['Content-Type' => 'text/html'], '<html>private-content</html>'));
+        $response = $this->isolatedMiddleware($injector)->process(new ServerRequest('GET', '/'), $handler);
+        $this->assertSame(503, $response->getStatusCode());
+        $this->assertStringNotContainsString('private-content', (string)$response->getBody());
+    }
+
+    public function test_head_render_does_not_consume_token_or_return_html(): void
+    {
+        $config = new Config(['siteKey' => 'test', 'secret' => 'test-secret']);
+        $store = $this->createMock(HtmlStore::class);
+        $store->expects($this->never())->method('consume');
+        $render = new RenderService($config, $store, new TokenSigner($config), new ConfigCache($this->createMock(ApiClient::class)));
+        $handler = $this->createMock(RequestHandlerInterface::class);
+        $handler->expects($this->never())->method('handle');
+        $response = $this->isolatedMiddleware(renderService: $render)->process((new ServerRequest('HEAD', '/__shugoi/render'))->withQueryParams(['token' => 'token', 'grant' => 'grant', 'mid' => 'mid']), $handler);
+        $this->assertSame('', (string)$response->getBody());
+        $this->assertStringContainsString('no-store', $response->getHeaderLine('Cache-Control'));
+        $this->assertFalse($response->hasHeader('Set-Cookie'));
+    }
+
+    public function test_render_array_parameters_are_rejected_without_cast_warnings(): void
+    {
+        $response = $this->isolatedMiddleware()->process((new ServerRequest('GET', '/__shugoi/render'))->withQueryParams(['token' => [], 'mid' => [], 'grant' => []]), $this->createMock(RequestHandlerInterface::class));
+        $this->assertSame(['error' => 'not_found'], json_decode((string)$response->getBody(), true));
+        $this->assertStringContainsString('no-store', $response->getHeaderLine('Cache-Control'));
+    }
+
+    public function test_metadata_response_replaces_stream_without_non_psr_truncate(): void
+    {
+        $handler = $this->createMock(RequestHandlerInterface::class);
+        $handler->method('handle')->willReturn(new Psr7Response(200, ['Content-Type' => 'text/html'], '<html><head><title>Public title</title></head><body>' . str_repeat('private-content', 100) . '</body></html>'));
+        $response = $this->isolatedMiddleware()->process(new ServerRequest('GET', 'https://example.com/', ['User-Agent' => 'Discordbot']), $handler);
+        $this->assertStringContainsString('Public title', (string)$response->getBody());
+        $this->assertStringNotContainsString('private-content', (string)$response->getBody());
+    }
+
+    public function test_render_url_respects_application_base_path(): void
+    {
+        $injector = $this->createMock(GuardInjector::class);
+        $injector->expects($this->once())->method('inject')
+            ->with($this->anything(), '/app/page', '', '', '', null, '/app/__shugoi/render')
+            ->willReturn('<html>guard</html>');
+        $handler = $this->createMock(RequestHandlerInterface::class);
+        $handler->method('handle')->willReturn(new Psr7Response(200, ['Content-Type' => 'text/html'], '<html>private-content</html>'));
+        $this->isolatedMiddleware($injector)->process((new ServerRequest('GET', '/app/page'))->withAttribute('shugoi.basePath', '/app'), $handler);
+    }
+
+    public function test_protected_streaming_html_fails_closed(): void
+    {
+        $handler = $this->createMock(RequestHandlerInterface::class);
+        $handler->method('handle')->willReturn(new Psr7Response(200, ['Content-Type' => 'text/html', 'X-Shugoi-Unbuffered' => '1']));
+        $response = $this->isolatedMiddleware()->process(new ServerRequest('GET', '/'), $handler);
+        $this->assertSame(503, $response->getStatusCode());
+        $this->assertStringContainsString('buffered HTML', (string)$response->getBody());
+        $this->assertFalse($response->hasHeader('X-Shugoi-Unbuffered'));
+    }
+
+    public function test_non_html_streams_pass_through(): void
+    {
+        $handler = $this->createMock(RequestHandlerInterface::class);
+        $handler->method('handle')->willReturn(new Psr7Response(200, ['Content-Type' => 'text/event-stream', 'X-Shugoi-Unbuffered' => '1']));
+        $response = $this->isolatedMiddleware()->process(new ServerRequest('GET', '/'), $handler);
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertFalse($response->hasHeader('X-Shugoi-Unbuffered'));
     }
 }
