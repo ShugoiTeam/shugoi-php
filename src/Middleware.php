@@ -104,6 +104,30 @@ class Middleware implements PsrMiddlewareInterface
         }
 
         $response = $handler->handle($request);
+        $defer = $request->getAttribute('shugoi.deferResponse');
+        if (is_callable($defer) && $method !== 'HEAD'
+            && $response->getHeaderLine('X-Shugoi-Unbuffered') !== '1'
+            && $this->config->autoInject && $this->config->splitRender
+            && !$this->core->isTrustedBot($ua, $ip) && !$this->core->isAllowlisted($path)
+            && ($response->getHeaderLine('Content-Type') === '' || str_contains($response->getHeaderLine('Content-Type'), 'text/html'))
+            && preg_match('/<html\b/i', (string)$response->getBody())) {
+            // Laravel's RequestHandled listeners can still add required assets.
+            // Its adapter finalizes protection after those listeners, before send().
+            $defer(fn(ResponseInterface $finalResponse) => $this->processResponse($request, $finalResponse));
+            return $response;
+        }
+        return $this->processResponse($request, $response);
+    }
+
+    private function processResponse(ServerRequestInterface $request, ResponseInterface $response): ResponseInterface
+    {
+        $method = strtoupper($request->getMethod());
+        $path = $request->getUri()->getPath();
+        $ua = $request->getHeaderLine('User-Agent');
+        $ip = $this->clientIp($request);
+        $host = $request->getHeaderLine('Host');
+        $acceptLanguage = $request->getHeaderLine('Accept-Language') ?: null;
+        $csp = $this->cspBuilder->build();
         $unbuffered = $response->getHeaderLine('X-Shugoi-Unbuffered') === '1';
         $response = $response->withoutHeader('X-Shugoi-Unbuffered');
         if ($method === 'HEAD') {

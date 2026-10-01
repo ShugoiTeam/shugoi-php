@@ -143,6 +143,48 @@ final class HttpProtectionTest extends TestCase
             ->assertOk()->assertSee('pow-start', false)->assertDontSee('private-page', false);
     }
 
+    public function test_split_render_stores_assets_added_by_late_framework_listeners(): void
+    {
+        $events = $this->app->make(\Illuminate\Contracts\Events\Dispatcher::class);
+        $calls = 0;
+        $events->listen(\Illuminate\Foundation\Http\Events\RequestHandled::class, static function ($event) use (&$calls): void {
+            ++$calls;
+            if (!str_contains($event->response->getContent(), '</head>')) return;
+            $event->response->setContent(str_replace('</head>', '<script src="/required-captcha.js"></script></head>', $event->response->getContent()));
+            $event->response->headers->set('X-Late-Asset-Listener', 'retained');
+        });
+        $admission = $this->get('/protected?sg_receipt=' . urlencode($this->receipt()), $this->browserHeaders());
+        $cookie = array_values(array_filter($admission->headers->getCookies(), static fn($value) => $value->getName() === '__sg_ok'))[0];
+        $browserCookie = explode(';', (string)$cookie, 2)[0];
+        $response = $this->get('/protected', $this->browserHeaders(['Cookie' => $browserCookie]));
+
+        $response->assertOk()->assertSee('window.__sg_siteKey=', false)->assertDontSee('private-page', false)
+            ->assertDontSee('/required-captcha.js', false)->assertHeader('X-Late-Asset-Listener', 'retained');
+        $entry = $this->app->make(HtmlStore::class)->hasFreshToken('sg_laravel_http_fixture', true);
+        $this->assertStringContainsString('<script src="/required-captcha.js"></script>', $entry['html']);
+        $this->assertSame(1, substr_count($entry['html'], '/required-captcha.js'));
+        $this->assertSame(1, substr_count($entry['html'], 'data-shugoi-livewire-navigation'));
+        $response->assertDontSee('data-shugoi-livewire-navigation', false);
+        $this->assertSame(2, $calls, 'RequestHandled must not be dispatched twice to finalize assets.');
+        $this->assertStringContainsString('no-store', $response->headers->get('Cache-Control'));
+    }
+
+    public function test_finalizer_failure_cannot_release_application_html(): void
+    {
+        $request = Request::create('/protected');
+        $response = response('<html>private-failure-document</html>');
+        $this->app->make(\Shugoi\Laravel\ResponseFinalizer::class)->defer($request, static function (): void {
+            throw new \RuntimeException('synthetic finalization failure');
+        });
+        $event = new \Illuminate\Foundation\Http\Events\RequestHandled($request, $response);
+        $this->app->make(\Illuminate\Contracts\Events\Dispatcher::class)->dispatch($event);
+
+        $this->assertSame(503, $response->getStatusCode());
+        $this->assertStringNotContainsString('private-failure-document', $response->getContent());
+        $this->assertStringContainsString('no-store', $response->headers->get('Cache-Control'));
+        $this->assertFalse($request->attributes->has('shugoi.finalizeResponse'));
+    }
+
     public function test_render_flow_preserves_web_session_cookies_and_single_use_storage(): void
     {
         // Cached Laravel configuration remains available even when APP_ENV is not
