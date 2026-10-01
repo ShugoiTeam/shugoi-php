@@ -10,7 +10,7 @@ use Nyholm\Psr7\ServerRequest;
 
 class ShugoiMiddleware
 {
-    public function __construct(private PsrMiddleware $middleware) {}
+    public function __construct(private PsrMiddleware $middleware, private ?ResponseFinalizer $finalizer = null) {}
 
     public function handle(Request $request, Closure $next): mixed
     {
@@ -38,6 +38,13 @@ class ShugoiMiddleware
             ->withAttribute('shugoi.basePath', $request->getBaseUrl())
             ->withAttribute('shugoi.clientIp', $request->getClientIp());
 
+        $deferred = null;
+        if ($this->finalizer?->isRegistered()) {
+            $psrRequest = $psrRequest->withAttribute('shugoi.deferResponse', static function (\Closure $callback) use (&$deferred): void {
+                $deferred = $callback;
+            });
+        }
+
         $handler = new class($next, $request) implements \Psr\Http\Server\RequestHandlerInterface {
             public ?\Symfony\Component\HttpFoundation\Response $response = null;
 
@@ -62,6 +69,16 @@ class ShugoiMiddleware
         };
 
         $psrResponse = $this->middleware->process($psrRequest, $handler);
+        if ($deferred !== null) {
+            $this->finalizer->defer($request, static function (\Symfony\Component\HttpFoundation\Response $response) use ($deferred): void {
+                $finalResponse = $deferred(new \Nyholm\Psr7\Response(
+                    $response->getStatusCode(), $response->headers->all(), $response->getContent()
+                ));
+                $response->setContent((string)$finalResponse->getBody());
+                $response->setStatusCode($finalResponse->getStatusCode());
+                $response->headers->replace($finalResponse->getHeaders());
+            });
+        }
         if ($handler->response !== null && !($handler->response instanceof \Symfony\Component\HttpFoundation\StreamedResponse) && !($handler->response instanceof \Symfony\Component\HttpFoundation\BinaryFileResponse)) {
             $response = $handler->response;
             $response->setContent((string)$psrResponse->getBody());
