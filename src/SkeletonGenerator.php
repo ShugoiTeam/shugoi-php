@@ -76,8 +76,10 @@ class SkeletonGenerator
         // The API guard already contains its own build/rotation. Rewriting its
         // function bodies breaks workers created from Function#toString: they
         // cannot access this document's string decoder in their separate realm.
+        // Escape document tags too: outer HTML asset injectors must not rewrite
+        // an error-page string inside the JavaScript payload.
         if (!empty($guards['detect'])) {
-            $guard = str_ireplace(['</script', '</style'], ['<\\/script', '<\\/style'], $guards['detect']);
+            $guard = preg_replace('~</([a-z][a-z0-9-]*)~i', '<\\\\/$1', $guards['detect']);
             $combined = str_replace('__shugoi_remote_guard__()', 'try{' . $guard . '}catch(e){window.__sg_blocked=true}', $combined);
         }
 

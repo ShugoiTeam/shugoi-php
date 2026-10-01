@@ -95,6 +95,16 @@ class SkeletonGeneratorTest extends TestCase
         $this->assertStringNotContainsString('__shugoi_remote_guard__()', $result);
     }
 
+    public function test_guard_html_strings_do_not_trigger_response_asset_injection(): void
+    {
+        $guard = 'window.errorPage="<head><style>x</style></head><body>error</body>";';
+        $result = $this->generator->generate('token', ['detect' => $guard], [], false, 'en', 'https://shugoi.com/api/v1');
+        $this->assertStringNotContainsString('</head>', $result);
+        $this->assertStringNotContainsString('</body>', $result);
+        $this->assertStringContainsString('<\\/head>', $result);
+        $this->assertSame(1, substr_count($result, '</script>'));
+    }
+
     public function test_showBlock_function_present_in_decoded_code(): void
     {
         $result = $this->generator->generate(
