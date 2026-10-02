@@ -40,7 +40,7 @@
   }
 
   window.__sg_wlcRequest = function (input, callback) {
-    var ws, timer, done = false;
+    var ws, timer, clockSentAt, done = false;
     function finish(error, text) {
       if (done) return;
       done = true;
@@ -49,16 +49,37 @@
       callback(error, text);
     }
     try {
-      var q = query(input, "wlc");
+      // The official guard also uses this transport for its main-thread clock
+      // sample. Rejecting that request leaves a zero drift fallback which is
+      // later mistaken for tampering when the worker measures a normal OS
+      // clock offset. Clock samples use their own WebSocket message type and
+      // cannot authorize a document or replace a signed WLC decision.
+      var clockUrl = new URL(input, location.href);
+      var isClock = clockUrl.origin === apiOrigin && clockUrl.pathname === apiPath + "/clock-drift"
+        && !clockUrl.search && !clockUrl.hash && !clockUrl.username && !clockUrl.password;
+      var q = isClock ? null : query(input, "wlc");
       ws = socket();
       timer = setTimeout(function () { finish("wlc_transport_timeout"); }, timeoutMs);
       ws.onopen = function () {
-        try { ws.send(JSON.stringify({ q: q })); }
+        try {
+          clockSentAt = Date.now();
+          ws.send(JSON.stringify(isClock ? { cmd: "clock-ping", tSend: clockSentAt } : { q: q }));
+        }
         catch (_) { finish("wlc_transport_send"); }
       };
       ws.onmessage = function (event) {
         if (typeof event.data !== "string" || event.data.length > 16384) {
           finish("wlc_transport_invalid_response");
+          return;
+        }
+        if (isClock) {
+          try {
+            var pong = JSON.parse(event.data);
+            if (!pong || pong.cmd !== "clock-pong" || pong.tSend !== clockSentAt
+              || !Number.isFinite(pong.tRecv) || !Number.isFinite(pong.tOut)
+              || pong.tRecv <= 0 || pong.tOut < pong.tRecv) throw new Error("invalid_clock_sample");
+            finish(null, JSON.stringify({ t: pong.tRecv / 2 + pong.tOut / 2 }));
+          } catch (_) { finish("wlc_transport_invalid_response"); }
           return;
         }
         // Pass the untouched signed decision to the official guard.
