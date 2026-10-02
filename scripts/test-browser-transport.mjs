@@ -169,6 +169,60 @@ test("WLC transport does not abort a response slower than 1500ms (independent of
   assert.deepEqual(calls, [[null, '{"allowed":true}']]);
 });
 
+test("main-thread clock measurement accepts real OS drift without inventing zero", () => {
+  for (const offset of [-30000, 30000, 120000]) {
+    const env = environment();
+    const calls = [];
+    env.window.__sg_wlcRequest("https://shugoi.com/api/v1/clock-drift", (...args) => calls.push(args));
+    const ws = env.sockets[0];
+    ws.emit("open");
+    const ping = JSON.parse(ws.sent[0]);
+    assert.equal(ping.cmd, "clock-ping");
+    assert.equal(typeof ping.tSend, "number");
+    const tRecv = ping.tSend + offset;
+    ws.emit("message", { data: JSON.stringify({ cmd: "clock-pong", tSend: ping.tSend, tRecv, tOut: tRecv + 2 }) });
+    assert.deepEqual(calls, [[null, JSON.stringify({ t: tRecv + 1 })]]);
+    assert.equal(env.window.__sg_grant, undefined);
+    assert.equal(ws.closed, true);
+    assert.equal(env.timers.size, 0);
+  }
+});
+
+test("clock transport rejects unmatched samples, signed decisions and failures", () => {
+  for (const kind of ["echo", "non-finite", "reversed", "decision", "malformed", "timeout", "close"]) {
+    const env = environment();
+    const calls = [];
+    env.window.__sg_wlcRequest("https://shugoi.com/api/v1/clock-drift", (...args) => calls.push(args));
+    const ws = env.sockets[0];ws.emit("open");
+    const ping = JSON.parse(ws.sent[0]);
+    let pong = { cmd: "clock-pong", tSend: ping.tSend, tRecv: NOW, tOut: NOW + 1 };
+    if (kind === "echo") pong.tSend++;
+    if (kind === "non-finite") pong.tRecv = "not-a-number";
+    if (kind === "reversed") pong.tOut = NOW - 1;
+    if (kind === "decision") pong = { allowed: true, grant: GRANT };
+    if (kind === "timeout") env.tick(8000);
+    else if (kind === "close") ws.emit("close");
+    else ws.emit("message", { data: kind === "malformed" ? "{" : JSON.stringify(pong) });
+    assert.equal(calls.length, 1, kind);
+    assert.match(calls[0][0], /^wlc_transport_/);
+    assert.equal(calls[0][1], undefined);
+    assert.equal(env.window.__sg_grant, undefined);
+    ws.emit("error");env.tick(16000);
+    assert.equal(calls.length, 1, kind);
+  }
+});
+
+test("clock transport only accepts the exact configured API clock endpoint", () => {
+  for (const url of ["https://evil.test/api/v1/clock-drift", "http://shugoi.com/api/v1/clock-drift",
+    "https://user@shugoi.com/api/v1/clock-drift", "https://shugoi.com/api/v1/clock-drift?x=1",
+    "https://shugoi.com/api/v1/clock-drift#fragment"]) {
+    const env = environment();const calls = [];
+    env.window.__sg_wlcRequest(url, error => calls.push(error));
+    assert.deepEqual(calls, ["wlc_transport_invalid"]);
+    assert.equal(env.sockets.length, 0);
+  }
+});
+
 test("WLC timeout, socket close, error, send failure and malformed response settle once", () => {
   for (const kind of ["timeout", "close", "error", "send", "binary", "oversize"]) {
     const env = environment();
