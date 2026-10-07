@@ -14,6 +14,7 @@ use Shugoi\SkeletonGenerator;
 use Shugoi\GuardInjector;
 use Shugoi\Pow;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 
 class ServiceProviderTest extends TestCase
 {
@@ -39,6 +40,12 @@ class ServiceProviderTest extends TestCase
     {
         $core = $this->app->make(Core::class);
         $this->assertInstanceOf(Core::class, $core);
+    }
+
+    public function test_websocket_transport_settings_are_exposed_to_laravel(): void
+    {
+        $this->assertSame('http', $this->app->make(Config::class)->browserTransport);
+        $this->assertArrayHasKey('shugoi:websocket', Artisan::all());
     }
 
     public function test_laravel_uses_shared_render_service_and_middleware(): void

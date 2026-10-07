@@ -31,7 +31,8 @@ class ScriptTags
             $locale,
             $this->config->baseUrl,
             './__shugoi/render',
-            $this->config->siteKey
+            $this->config->siteKey,
+            $this->config->browserTransport === 'websocket'
         );
         return [
             'guardDetect' => $skeleton,

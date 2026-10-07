@@ -22,7 +22,8 @@
     "source": "https://github.com/ShugoiTeam/shugoi-php"
   },
   "suggest": {
-    "nyholm/psr7": "Required for Laravel integration (PSR-7 HTTP message implementation)"
+    "nyholm/psr7": "Required for Laravel integration (PSR-7 HTTP message implementation)",
+    "ext-openswoole": "Required only for the optional shugoi:websocket render sidecar"
   },
   "autoload": {
     "psr-4": {

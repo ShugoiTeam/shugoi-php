@@ -1,0 +1,10 @@
+/vendor
+/.env
+/bootstrap/cache/*.php
+/storage/framework/cache/data/*
+!/storage/framework/cache/data/.gitkeep
+/storage/framework/sessions/*
+/storage/framework/views/*
+/storage/logs/*.log
+/public/build
+/public/hot

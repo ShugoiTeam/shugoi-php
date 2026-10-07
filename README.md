@@ -10,23 +10,24 @@ Shugoi is a full-featured anti-abuse protection layer for PHP applications. It c
 - **Edge blocking** — Headless browser detection (curl, wget, python, puppeteer, etc.), fake browser detection (missing Sec-Fetch headers), rate limiting with configurable thresholds
 - **Client-side fingerprinting** — Tor Browser detection, VM/machine detection, anti-detect browser detection, headless Chrome/Puppeteer detection via Web Worker
 - **Whitelist** — machineId-based whitelist managed from the Shugoi dashboard, bypasses all client-side checks
-- **Split-render** - Original HTML stays server-side behind an exact, single-use signed token. Browser detection exchanges use WebSocket; a signed grant releases HTML through the same-origin `/__shugoi/render` endpoint.
+- **Split-render** - Original HTML stays server-side behind an exact, single-use signed token. Browser detection exchanges use WebSocket; a signed grant releases HTML through same-origin HTTP by default, or through the optional WebSocket render sidecar.
 - **WebSocket proof of work** - A separate PHP CLI gateway issues and verifies the preflight challenge. The browser receives a signed receipt bound to its IP and user agent; PHP consumes it once before setting its admission cookie.
 - **Crawler metadata isolation** — Recognized crawler user agents receive only an escaped document containing the original page's title, description, OpenGraph/Twitter tags and canonical link. The protected page body is never returned to this branch; FCrDNS remains required for any trusted-bot access decision.
 - **Content replacement detection** — If the render endpoint is called with an invalid/consumed token and `enableContentReplacementCheck` is enabled, a block card "Remplacement de contenu client détecté" is shown with full neobrutalist styling
 - **CSP injection** — Automatic Content-Security-Policy header with proper origins for scripts, fonts, images; optionally extensible via `extraDirectives`
 - **Bot verification** — Reverse DNS (FCrDNS) verification for Googlebot, Bingbot, YandexBot, Applebot, etc.
 - **Obfuscation** — The bootstrap is obfuscated (function renaming, line shuffling, XOR string encryption and decoder injection) without the retired invisible-eval wrapper
-- **Block page** — Full neobrutalist shield page with Alex Brush font, favicon + brand images, pink h2, noise SVG background, countdown timer for rate limits. Consistent ASCII block page for non-browser clients
+- **Block page** — Shugoi-styled shield page with browser-matched background palettes, brand images, Reggae One display font, and a countdown for rate limits. Consistent plain-text block page for non-browser clients
 - **Multi-process support** — Shared disk-based HTML token storage for PHP built-in server, Laravel Octane, or any multi-worker setup
 - **PSR-15 middleware** — Framework-agnostic, compatible with any PSR-15 implementation
-- **Laravel integration** — ServiceProvider with auto-wiring, HTTP middleware wrapper, Facade, Blade directives (`@shugoiHead`, `@shugoiBody`), Artisan commands (`shugoi:setup`, `shugoi:check`)
+- **Laravel integration** — ServiceProvider with auto-wiring, HTTP middleware wrapper, Facade, Blade directives (`@shugoiHead`, `@shugoiBody`), and Artisan commands (`shugoi:setup`, `shugoi:check`, `shugoi:websocket`)
 - **Localization** — Full FR/EN support for block pages and error messages
 
 ## Requirements
 
 - PHP 8.2+
 - Laravel 11+ (for Laravel integration)
+- OpenSwoole PHP extension (only when using the optional render WebSocket sidecar)
 - Guzzle 7+
 - PSR-15 compatible middleware (for standalone usage)
 
@@ -65,6 +66,13 @@ Configure and start the [PHP WebSocket gateway](docs/websocket-gateway.md), incl
 Laravel uses this same package and PoW gateway; no separate Laravel SDK is needed.
 Follow the [Laravel deployment notes](docs/websocket-gateway.md#laravel-deployment)
 for middleware order, private storage, cached configuration and gateway secrets.
+
+The same-origin render WebSocket is an optional transport. Enable it with
+`SHUGOI_BROWSER_TRANSPORT=websocket`, `SHUGOI_RENDER_STORE=disk`,
+`SHUGOI_RENDER_STORE_PATH`, and `SHUGOI_PUBLIC_ORIGIN`, then run
+`php artisan shugoi:websocket` behind a TLS reverse proxy. The
+[Laravel WebSocket demo](demo/websocket-test-site/README.md) includes a
+configuration example.
 
 ## Demo
 
@@ -170,7 +178,12 @@ Invalid, expired and consumed render tokens are always refused, including when `
 | `csp` | bool | `true` | Enable CSP header |
 | `splitRender` | bool | `true` | Enable guarded bootstrap injection |
 | `multiProcess` | bool | `false` | Shared HTML storage (Laravel defaults to true) |
+| `browserTransport` | string | `http` | Render transport (`http` or optional `websocket`) |
+| `renderStore` | string | `memory` | Render-store mode; WebSocket render needs `disk` |
 | `renderStorePath` | string | site-scoped in Laravel | Private shared HTML directory |
+| `websocketBind` | string | `127.0.0.1` | Local bind address for the render sidecar |
+| `websocketPort` | int | `8787` | Local port for the render sidecar |
+| `publicOrigin` | string | - | Exact public HTTPS origin accepted by the render sidecar |
 | `powWebSocketUrl` | string | `/__sg_challenge/ws` | Public PoW gateway URL |
 | `powReceiptStorePath` | string | site-scoped temporary directory | Private shared consumed-receipt directory |
 | `verifyBots` | bool | `true` | Reverse DNS bot verification |

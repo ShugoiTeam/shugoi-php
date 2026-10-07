@@ -5,7 +5,7 @@ namespace Shugoi;
 class Config
 {
     public const DEFAULT_ALLOWLIST = ['/api', '/legal'];
-    public const DEFAULT_BASE_URL = 'https://shugoi.com/api/v1';
+    public const DEFAULT_BASE_URL = 'https://api.shugoi.com/api/v1';
     public const DEFAULT_BLOCK_STATUS = 403;
 
     public const DEFAULT_HEADLESS_PATTERNS = [
@@ -65,6 +65,11 @@ class Config
     public readonly int $powDifficulty;
     public readonly int $powTtlMs;
     public readonly int $powOkTtlMs;
+    public readonly string $browserTransport;
+    public readonly string $renderStore;
+    public readonly string $websocketBind;
+    public readonly int $websocketPort;
+    public readonly ?string $publicOrigin;
 
     public function __construct(array $options = [])
     {
@@ -97,11 +102,26 @@ class Config
         $this->powDifficulty = $options['powDifficulty'] ?? 14;
         $this->powTtlMs = $options['powTtlMs'] ?? 60_000;
         $this->powOkTtlMs = $options['powOkTtlMs'] ?? 30 * 24 * 3600 * 1000;
+        $this->browserTransport = $options['browserTransport'] ?? 'http';
+        $this->renderStore = $options['renderStore'] ?? 'memory';
+        $this->websocketBind = $options['websocketBind'] ?? '127.0.0.1';
+        $this->websocketPort = (int)($options['websocketPort'] ?? 8787);
+        $this->publicOrigin = $options['publicOrigin'] ?? null;
+        if (!in_array($this->browserTransport, ['http', 'websocket'], true)) {
+            throw new \InvalidArgumentException('browserTransport must be http or websocket');
+        }
+        if ($this->browserTransport === 'websocket' && ($this->renderStore !== 'disk' || $this->renderStorePath === null || $this->renderStorePath === '' || $this->publicOrigin === null || $this->publicOrigin === '')) {
+            throw new \InvalidArgumentException('WebSocket transport requires a disk render store and publicOrigin');
+        }
     }
 
     public function getSigningSecret(): string
     {
-        $secret = $this->signingSecret ?? $this->secret;
+        // Match Node's `signingSecret || secret`: an empty env value must not
+        // shadow a configured signing secret.
+        $secret = ($this->signingSecret !== null && $this->signingSecret !== '')
+            ? $this->signingSecret
+            : $this->secret;
 
         if ($secret === null || $secret === '') {
             throw new \RuntimeException('No signing secret configured');

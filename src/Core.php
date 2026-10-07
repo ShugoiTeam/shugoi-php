@@ -152,6 +152,7 @@ class Core
                         'message' => Locales::get($locale, 'rateLimitBody', $timeStr),
                         'badge' => Locales::get($locale, 'rateLimitBadge'),
                         'host' => $ctx['host'] ?? '',
+                        'ua' => $ua,
                         'remainingSeconds' => $remaining,
                         'locale' => $locale,
                     ]);
@@ -161,6 +162,7 @@ class Core
                         'locale' => $locale,
                         'remainingSeconds' => $remaining,
                         'host' => $ctx['host'] ?? null,
+                        'ua' => $ua,
                     ]);
                 }
                 return [
@@ -194,6 +196,7 @@ class Core
                     'locale' => $locale,
                     'remainingSeconds' => 60,
                     'host' => $ctx['host'] ?? null,
+                    'ua' => (string)($ctx['ua'] ?? ''),
                 ]),
             ];
         }
