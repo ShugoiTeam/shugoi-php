@@ -67,7 +67,6 @@ class Config
     public readonly int $powOkTtlMs;
     public readonly string $browserTransport;
     public readonly string $renderStore;
-    public readonly string $renderStorePath;
     public readonly string $websocketBind;
     public readonly int $websocketPort;
     public readonly ?string $publicOrigin;
@@ -100,19 +99,18 @@ class Config
         $this->powReceiptStorePath = $options['powReceiptStorePath'] ?? null;
         $this->failOpenOnUnavailable = $options['failOpenOnUnavailable'] ?? false;
         $this->verifyBots = $options['verifyBots'] ?? true;
-        $this->powDifficulty = $options['powDifficulty'] ?? 12;
-        $this->powTtlMs = $options['powTtlMs'] ?? 120_000;
-        $this->powOkTtlMs = $options['powOkTtlMs'] ?? 24 * 3600 * 1000;
+        $this->powDifficulty = $options['powDifficulty'] ?? 14;
+        $this->powTtlMs = $options['powTtlMs'] ?? 60_000;
+        $this->powOkTtlMs = $options['powOkTtlMs'] ?? 30 * 24 * 3600 * 1000;
         $this->browserTransport = $options['browserTransport'] ?? 'http';
         $this->renderStore = $options['renderStore'] ?? 'memory';
-        $this->renderStorePath = $options['renderStorePath'] ?? '';
         $this->websocketBind = $options['websocketBind'] ?? '127.0.0.1';
         $this->websocketPort = (int)($options['websocketPort'] ?? 8787);
         $this->publicOrigin = $options['publicOrigin'] ?? null;
         if (!in_array($this->browserTransport, ['http', 'websocket'], true)) {
             throw new \InvalidArgumentException('browserTransport must be http or websocket');
         }
-        if ($this->browserTransport === 'websocket' && ($this->renderStore !== 'disk' || $this->renderStorePath === '' || $this->publicOrigin === null || $this->publicOrigin === '')) {
+        if ($this->browserTransport === 'websocket' && ($this->renderStore !== 'disk' || $this->renderStorePath === null || $this->renderStorePath === '' || $this->publicOrigin === null || $this->publicOrigin === '')) {
             throw new \InvalidArgumentException('WebSocket transport requires a disk render store and publicOrigin');
         }
     }

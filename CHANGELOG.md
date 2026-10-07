@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-10-07
 
 - Move preflight PoW to a supervised PHP WebSocket gateway, with short-lived,
   IP/UA-bound admission receipts consumed once across web workers.
@@ -11,6 +11,10 @@
   when environment values are available only in Laravel's cached configuration.
 - Add Laravel HTTP-kernel regression coverage and deployment instructions for
   global middleware, trusted proxies, private storage and the gateway service.
+- Add an optional OpenSwoole render/WebSocket sidecar with a shared disk-backed
+  store, Laravel environment settings, and the `shugoi:websocket` Artisan command.
+- Align direct `Config` defaults with Laravel's proof-of-work settings and keep
+  the browser-block page tests aligned with the current Shugoi display font.
 
 ## 0.4.12
 

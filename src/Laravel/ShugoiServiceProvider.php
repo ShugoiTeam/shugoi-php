@@ -21,6 +21,7 @@ use Shugoi\RenderService;
 use Shugoi\Obfuscator;
 use Shugoi\Laravel\Commands\ShugoiSetupCommand;
 use Shugoi\Laravel\Commands\ShugoiCheckCommand;
+use Shugoi\Laravel\Commands\ShugoiWebSocketCommand;
 
 class ShugoiServiceProvider extends ServiceProvider
 {
@@ -107,7 +108,7 @@ class ShugoiServiceProvider extends ServiceProvider
         $this->loadRoutesFrom(__DIR__ . '/../../routes/shugoi.php');
 
         if ($this->app->runningInConsole()) {
-            $this->commands([ShugoiSetupCommand::class, ShugoiCheckCommand::class]);
+            $this->commands([ShugoiSetupCommand::class, ShugoiCheckCommand::class, ShugoiWebSocketCommand::class]);
         }
     }
 }

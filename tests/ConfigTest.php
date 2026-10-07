@@ -29,6 +29,14 @@ class ConfigTest extends TestCase
         $this->assertTrue($config->splitRender);
         $this->assertFalse($config->multiProcess);
         $this->assertNull($config->renderStorePath);
+        $this->assertSame(14, $config->powDifficulty);
+        $this->assertSame(60_000, $config->powTtlMs);
+        $this->assertSame(30 * 24 * 3600 * 1000, $config->powOkTtlMs);
+        $this->assertSame('http', $config->browserTransport);
+        $this->assertSame('memory', $config->renderStore);
+        $this->assertSame('127.0.0.1', $config->websocketBind);
+        $this->assertSame(8787, $config->websocketPort);
+        $this->assertNull($config->publicOrigin);
         $this->assertTrue($config->verifyBots);
     }
 
@@ -91,6 +99,30 @@ class ConfigTest extends TestCase
     {
         $config = new Config(['siteKey' => 'test', 'renderStorePath' => '/var/cache/application/shugoi']);
         $this->assertSame('/var/cache/application/shugoi', $config->renderStorePath);
+    }
+
+    public function testWebSocketTransportRequiresDiskStorePathAndPublicOrigin(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('WebSocket transport requires a disk render store and publicOrigin');
+
+        new Config(['siteKey' => 'test', 'browserTransport' => 'websocket']);
+    }
+
+    public function testWebSocketTransportAcceptsDiskStorePathAndPublicOrigin(): void
+    {
+        $config = new Config([
+            'siteKey' => 'test',
+            'browserTransport' => 'websocket',
+            'renderStore' => 'disk',
+            'renderStorePath' => '/var/cache/application/shugoi',
+            'publicOrigin' => 'https://app.example.com',
+        ]);
+
+        $this->assertSame('websocket', $config->browserTransport);
+        $this->assertSame('disk', $config->renderStore);
+        $this->assertSame('/var/cache/application/shugoi', $config->renderStorePath);
+        $this->assertSame('https://app.example.com', $config->publicOrigin);
     }
 
     public function testAllowlistCanBeOverridden()

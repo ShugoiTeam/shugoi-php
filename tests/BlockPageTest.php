@@ -89,11 +89,11 @@ class BlockPageTest extends TestCase
         $this->assertStringNotContainsString('<b>bold</b>', $html);
     }
 
-    public function testShieldContainsAlexBrushFont(): void
+    public function testShieldUsesShugoiDisplayFont(): void
     {
         $html = BlockPage::shield('en', 'Title', 'Msg', 'BADGE');
-        $this->assertStringContainsString('Alex Brush', $html);
-        $this->assertStringContainsString('alex-brush.woff2', $html);
+        $this->assertStringContainsString("font-family:'Reggae One'", $html);
+        $this->assertStringContainsString('reggae-one.woff2', $html);
     }
 
     public function testShieldContainsBlockingFavicon(): void
