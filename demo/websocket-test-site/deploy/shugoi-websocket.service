@@ -1,0 +1,21 @@
+[Unit]
+Description=Shugoi WebSocket sidecar for the test site
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/shugoi-websocket-test-site
+ExecStart=/usr/bin/php /var/www/shugoi-websocket-test-site/artisan shugoi:websocket
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/shugoi-websocket-test-site/storage /var/www/shugoi-websocket-test-site/bootstrap/cache /var/lib/shugoi-websocket-demo/render
+
+[Install]
+WantedBy=multi-user.target

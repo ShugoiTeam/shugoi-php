@@ -16,7 +16,8 @@ class SkeletonGenerator
         string $locale,
         string $baseUrl,
         string $renderUrl = './__shugoi/render',
-        string $siteKey = ''
+        string $siteKey = '',
+        bool $renderWebSocket = false
     ): string {
         $flags = $config['detectionFlags'] ?? [];
         $msgs = Locales::getAll($locale);
@@ -24,6 +25,12 @@ class SkeletonGenerator
         $fragments = [];
         $fragments[] = 'window.__sg_siteKey=' . json_encode($siteKey, JSON_UNESCAPED_UNICODE);
         $fragments[] = 'window.__sg_baseUrl=' . json_encode($baseUrl, JSON_UNESCAPED_UNICODE);
+        if ($renderWebSocket) {
+            $fragments[] = 'window.__sg_renderBaseUrl=(location.origin||location.protocol+"//"+location.host)+"/api/v1"';
+            $fragments[] = 'window.__sg_wsBaseUrl=window.__sg_renderBaseUrl';
+            $fragments[] = 'window.__sg_baseUrl=window.__sg_renderBaseUrl';
+            $fragments[] = 'try{var _sgWsBase=new URL(window.__sg_wsBaseUrl,location.href);var _sgPre=new WebSocket((_sgWsBase.protocol==="https:"?"wss://":"ws://")+_sgWsBase.host+_sgWsBase.pathname.replace(/\\/$/,"")+"/ws-wlc");window.__sg_wlcPreSocket=_sgPre}catch(_e){}';
+        }
         $fragments[] = 'window.__sg_config=' . json_encode($flags);
         $fragments[] = 'window.__sg_token=' . json_encode($token);
         $fragments[] = 'window.__sg_renderUrl=' . json_encode($renderUrl);
@@ -57,7 +64,7 @@ class SkeletonGenerator
         $fragments[] = 'var k=' . json_encode($siteKey);
         $fragments[] = 'var b=' . json_encode($baseUrl);
         $fragments[] = 'var r=' . json_encode($renderUrl);
-        $fragments[] = $this->rdFragment($msgs);
+        $fragments[] = $this->rdFragment($msgs, $renderWebSocket);
         $fragments[] = "_gw(function(){rd(r+\"?token=\"+t,0);setTimeout(_sgCl,1500)})";
         $fragments[] = $this->cleanupFragment();
 
@@ -88,40 +95,35 @@ class SkeletonGenerator
 
     private function showBlockFragment(array $msgs, string $supportEmail): string
     {
-        $fbBadge = self::jsStr($msgs['blockedBadge']);
-        $fbTitle = self::jsStr($msgs['blockedTitle']);
-        $restrictedTitle = self::jsStr($msgs['restrictedTitle']);
-        $restrictedBody = self::jsStr(sprintf($msgs['restrictedBody'], '<strong style="color:#c2546f">' . ($supportEmail !== '' ? $supportEmail : 'support@shugoi.com') . '</strong>'));
+        $toJs = static fn(string $value): string => json_encode($value, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $support = htmlspecialchars($supportEmail !== '' ? $supportEmail : 'support@shugoi.com', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $restrictedBody = sprintf($msgs['restrictedBody'], '<strong>' . $support . '</strong>');
         return 'window.__sg_showBlock=function(msg,title,badge){'
-            . 'if((msg==="Accès restreint"||msg==="Restricted Access")&&/n\\\'est pas autorisé|not authorized/i.test(String(title||""))){var _sgMid=(window.__sg_detectMid||window.__sg_mid||"");msg="' . $restrictedBody . '"+( _sgMid?" <code style=\\"font-size:.7rem\\">"+_sgMid+"</code>":"");title="' . $restrictedTitle . '"}'
-            . 'var h='
-            . '"<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><style>'
-            . "@font-face{font-family:\\x27Alex Brush\\x27;src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\\x27woff2\\x27);font-display:swap}"
-            . '*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}'
-            . "body{font-family:system-ui,-apple-system,\\x27Segoe UI\\x27,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}"
-            . '#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}'
-            . '#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}'
-            . '#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}'
-            . '#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}'
-            . "h2{font-family:\\x27Alex Brush\\x27,Georgia,\\x27Times New Roman\\x27,serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}"
-            . '#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}'
-            . '#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}'
-            . '@media (prefers-color-scheme:dark){html,body{background:#16101c}'
-            . '#c{background:#241a30;border-color:rgba(241,232,245,.14);box-shadow:0 10px 30px rgba(0,0,0,.4)}'
-            . '#c .bdg{background:rgba(233,137,159,.16);border-color:rgba(233,137,159,.5);color:#e9899f}'
-            . '#c h2{color:#e9899f}'
-            . '#c p.desc{color:#a795b4}'
-            . '#c p.ft{color:#e9899f}}'
-            . '</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l>'
-            . '<img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||"' . $fbBadge . '")+"</div>'
-            . '<h2>"+(title||"' . $fbTitle . '")+"</h2><p class=desc>"+(msg||"")+"</p>'
-            . '<p class=ft>"+location.hostname+" \\u00b7 Shugoi</p></div></body>";document.documentElement.innerHTML=h}';
+            . 'if((msg==="Accès restreint"||msg==="Restricted Access")&&/n\\\'est pas autorisé|not authorized/i.test(String(title||""))){var _sgMid=(window.__sg_detectMid||window.__sg_mid||"");msg=' . $toJs($restrictedBody) . '+( _sgMid?" <code style=\\"font-size:.7rem\\">"+_sgMid+"</code>":"");title=' . $toJs($msgs['restrictedTitle']) . '}'
+            . 'var _ua=navigator.userAgent||"",_light="#fff",_dark="#202124";'
+            . 'if(/Edg\\//.test(_ua)){_light="#f6f6f6";_dark="#2d2d2d"}'
+            . 'else if(/Firefox\\//.test(_ua)){_light="#f9f9fb";_dark="#2b2a33"}'
+            . 'else if(/AppleWebKit/.test(_ua)&&!/Chrome|Chromium|Edg\\/|OPR\\//.test(_ua)){_light="#f6f6f6";_dark="rgb(30,30,30)"}'
+            . 'else if(/OPR\\//.test(_ua)){_light="#eef3f7";_dark="#101214"}'
+            . 'var css=\'@font-face{font-family:"Reggae One";src:url(https://shugoi.com/reggae-one.woff2) format("woff2");font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:\'+_light+\'}body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fffdfa;border:1px solid rgba(43,33,29,.16);border-radius:16px 5px 16px 5px;box-shadow:0 10px 30px rgba(43,33,29,.08);padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;filter:drop-shadow(2px 4px 8px rgba(231,112,144,.55));margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;background:#fdf0f4;border:1px solid rgba(194,84,111,.35);border-radius:10px 4px 10px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.16em;color:#a83d5a;margin-bottom:1.4rem}#c h2{font-family:"Reggae One",Georgia,serif;font-size:2.2rem;color:#a83d5a;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#7a6a62;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#a83d5a;margin-top:1.8rem}@media(prefers-color-scheme:dark){html,body{background:\'+_dark+\'}#c{background:#241a30;border-color:rgba(241,232,245,.14);box-shadow:0 10px 30px rgba(0,0,0,.4)}#c .bdg{background:rgba(233,137,159,.16);border-color:rgba(233,137,159,.5);color:#e9899f}#c h2,#c p.ft{color:#e9899f}#c p.desc{color:#a795b4}}</style>\';'
+            . 'var h="<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><meta name=color-scheme content=\"light dark\"><style>"+css+"</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l><img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||' . $toJs($msgs['blockedBadge']) . ')+"</div><h2>"+(title||' . $toJs($msgs['blockedTitle']) . ')+"</h2><p class=desc>"+(msg||"")+"</p><p class=ft>"+location.hostname+" · Shugoi</p></div></body>";document.documentElement.innerHTML=h}';
     }
 
-    private function rdFragment(array $msgs): string
+    private function rdFragment(array $msgs, bool $renderWebSocket = false): string
     {
         $devtools = self::jsStr($msgs['devtoolsBody']);
         $tamperTitle = self::jsStr($msgs['tamperTitle']);
+        if ($renderWebSocket) {
+            return 'var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};'
+                . 'function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);'
+                . 'if(n>6){window.__sg_showBlock&&window.__sg_showBlock("' . self::jsStr($msgs['renderFailedBody']) . '","' . self::jsStr($msgs['serviceUnavailableTitle']) . '");return}'
+                . 'var _g=window.__sg_grant||"",_m=window.__sg_detectMid||window.__sg_mid||"";if(!_g||!_m)return setTimeout(function(){rd(p,n+1)},100);'
+                . 'var _done=false,_retrying=false,_w=null,_to=setTimeout(function(){try{if(_w)_w.close()}catch(_e){}again()},6500);function again(){if(_done||_retrying)return;_retrying=true;clearTimeout(_to);setTimeout(function(){rd(p,n+1)},300)}'
+                . 'try{var _u=new URL("/__shugoi/render/ws",location.href);_u.protocol=location.protocol==="https:"?"wss:":"ws:";_w=new WebSocket(_u.href);'
+                . '_w.onopen=function(){try{_w.send(JSON.stringify({token:t,mid:_m,grant:_g}))}catch(_e){_w.close()}};'
+                . '_w.onmessage=function(e){if(_done||window.__sg_blocked)return;_done=true;clearTimeout(_to);var h=String(e.data);if(!/^\\s*<!doctype|^\\s*<html/i.test(h)){window.__sg_showBlock&&window.__sg_showBlock("' . self::jsStr($msgs['renderFailedBody']) . '","' . self::jsStr($msgs['serviceUnavailableTitle']) . '");return}window.__sg_renderDone=true;try{delete window.__sg_disableRestrictedAccess}catch(_e){}document.open("text/html");document.write(h);document.close();window.scrollTo(0,0)};'
+                . '_w.onerror=function(){try{_w.close()}catch(_e){again()}};_w.onclose=function(){again()}}catch(_e){again()}}';
+        }
         return 'var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};'
             . 'function rd(p,n){if(window.__sg_blocked||window.__sg_renderStarted||window.__sg_renderDone)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);'
             . 'if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' . $devtools . '","' . $tamperTitle . '");return}'
