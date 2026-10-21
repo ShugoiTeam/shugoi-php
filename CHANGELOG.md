@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Security
+- Require patched PHP branches for CVE-2026-109618 and CVE-2026-109619:
+  8.2.35+, 8.3.36+, 8.4.27+ or 8.5.12+ within PHP 8.x.
+- Document that the interpreter and persistent workers must be upgraded and
+  restarted; the SDK cannot mitigate vulnerabilities before PHP request parsing.
+- Test the Composer constraint against vulnerable and patched patch boundaries,
+  and extend SDK CI coverage to PHP 8.5.
+
+## Unreleased
+
 - Move preflight PoW to a supervised PHP WebSocket gateway, with short-lived,
   IP/UA-bound admission receipts consumed once across web workers.
 - Restore browser guard WebSocket transport and require signed, single-use HTML

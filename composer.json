@@ -4,7 +4,7 @@
   "type": "library",
   "license": "MIT",
   "require": {
-    "php": ">=8.2",
+    "php": "~8.2.35-stable || ~8.3.36-stable || ~8.4.27-stable || ^8.5.12-stable",
     "amphp/websocket-server": "^4.0",
     "guzzlehttp/guzzle": "^7.0",
     "psr/http-server-middleware": "^1.0",
@@ -12,6 +12,7 @@
     "nyholm/psr7": "^1.8"
   },
   "require-dev": {
+    "composer/semver": "^3.4",
     "phpunit/phpunit": "^11.0",
     "orchestra/testbench": "^10.0",
     "mockery/mockery": "^1.6"

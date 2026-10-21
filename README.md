@@ -25,10 +25,26 @@ Shugoi is a full-featured anti-abuse protection layer for PHP applications. It c
 
 ## Requirements
 
-- PHP 8.2+
+- PHP 8.2.35+, 8.3.36+, 8.4.27+ or 8.5.12+ within the PHP 8.x series
 - Laravel 11+ (for Laravel integration)
 - Guzzle 7+
 - PSR-15 compatible middleware (for standalone usage)
+
+### PHP security updates
+
+Upgrade every PHP runtime serving the application, including PHP-FPM/Apache,
+CLI WebSocket gateways and optional render sidecars, then restart the affected
+processes. The minimum patch versions above address
+[CVE-2026-109618 and CVE-2026-109619](https://www.php.net/archive/2026.php).
+These are PHP engine vulnerabilities: updating the SDK or enabling Shugoi cannot
+patch the interpreter, and request parsing can occur before the middleware runs.
+
+Composer rejects the known vulnerable PHP version ranges for new installations
+and updates. Do not bypass this check with `--ignore-platform-reqs` or use
+`config.platform.php` as evidence that the deployed runtime is patched. Verify
+the web worker and gateway binaries as well as `php -v`; they can use different
+PHP installations. See the [PHP security advisory](https://www.php.net/archive/2026.php)
+for upstream guidance, including vendor backports.
 
 ## Installation
 

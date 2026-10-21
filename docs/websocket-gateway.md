@@ -8,7 +8,10 @@ proofs in `sg_proof` no longer grant admission.
 
 The CLI process uses [AM PHP's WebSocket server](https://amphp.org/websocket-server)
 for the RFC 6455 handshake, framing, masking, ping/pong and protocol limits. It
-requires PHP 8.2+ with Composer dependencies installed and a process supervisor.
+requires a [security-patched PHP runtime](../README.md#php-security-updates)
+(8.2.35+, 8.3.36+, 8.4.27+ or 8.5.12+) with Composer dependencies installed and a
+process supervisor. Restart the gateway after upgrading its PHP binary; an
+already running process continues using the old interpreter.
 PHP-FPM alone cannot provide this persistent WebSocket endpoint. The browser
 detection and whitelist transport still connects to the Shugoi API; this local
 gateway is specifically for proof of work.
