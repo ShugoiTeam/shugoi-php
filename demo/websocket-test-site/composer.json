@@ -3,7 +3,7 @@
   "description": "Standalone Laravel site for testing the Shugoi PHP WebSocket transport",
   "type": "project",
   "require": {
-    "php": "^8.2",
+    "php": "~8.2.35-stable || ~8.3.36-stable || ~8.4.27-stable || ^8.5.12-stable",
     "laravel/framework": "^12.0",
     "shugoi/shugoi-php": "0.5.0"
   },
